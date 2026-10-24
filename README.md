@@ -1,38 +1,44 @@
 # 2026 NUEDC H 题 —— 车载滚球平衡运动控制系统
 
-双芯片协作方案：两颗 MCU 各管一半，机械解耦、外设不共享、通过串口交换状态。
+两块 MCU **完全独立运行，彼此不接线**，只在机械结构上共存；唯一的数据流是
+摄像头 → 滚球板的单向串口，详见 `docs/protocol.md`。
 
 ## 目录结构
 
 ```
 .
 ├── README.md                    本文件：整体架构与协作约定
-├── .gitignore                   三套工具链（CCS / Keil / CubeIDE）的忽略规则
+├── .gitignore                   CCS / Keil / CubeIDE / Python 的忽略规则
 ├── .gitattributes               换行符与二进制文件规则
 ├── docs/
-│   └── protocol.md              双芯串口通信协议（唯一真相源）
-├── mspm0_line_follow/           芯片 A：MSPM0G3507 —— 循迹
-├── stm32f411_ball/              芯片 B：STM32F411 —— 滚球平衡
+│   └── protocol.md              串口协议（唯一真相源）
+├── mspm0_line_follow/           循迹板：MSPM0G3507
+├── stm32f411_ball/              滚球板：STM32F411
 └── vision/
-    └── maixcam/                 MaixCam 视觉：小球检测 + 串口发帧
+    └── maixcam/                 摄像头：小球检测 + 串口发帧
 ```
 
-## 双芯分工
+## 三块硬件的分工
 
-| 芯片 | 型号 | 职责 | 工程目录 | 负责人 |
+| 名字 | 型号 | 职责 | 工程目录 | 负责人 |
 | --- | --- | --- | --- | --- |
-| A | MSPM0G3507 | 8 路灰度 → 循迹 PD → 差速 → 轮速 PI → TB6612 双直流电机 | `mspm0_line_follow/` | youyucat |
-| B | STM32F411 | 小球位置采集 → 导轨闭环 → 步进电机维持平衡 | `stm32f411_ball/` | jove061 |
-| 视觉 | MaixCam | 管道标定 + 钢球检测 → 12 字节帧（UART1 115200） | `vision/maixcam/` | 共用 |
+| 循迹板 | MSPM0G3507 | 8 路灰度 → 循迹 PD → 差速 → 轮速 PI → TB6612 双直流电机 | `mspm0_line_follow/` | youyucat |
+| 滚球板 | STM32F411 | 小球位置采集 → 导轨闭环 → 步进电机维持平衡 | `stm32f411_ball/` | jove061 |
+| 摄像头 | MaixCam | 管道标定 + 钢球检测 → 12 字节帧 | `vision/maixcam/` | 共用 |
 
-两颗芯片**不共享任何外设**，只在机械结构上共存；数据交互只走串口，帧格式见 `docs/protocol.md`。
+**循迹板与滚球板之间不接任何信号线。** 曾经考虑过把车体加速度发给滚球板做前馈，
+已评估取消（滚球板串口接收脚被摄像头占用，且把车开稳收益更大），
+决策记录见 `docs/protocol.md` 第 1 节。
 
-视觉侧部署与标定见 `vision/maixcam/README.md`。**注意 MaixCam 的 WiFi 密码放在
+由此产生一个硬性约束：**循迹板开得越平稳，小球越稳**，
+因为没有任何跨板补偿能救急。量化分析见 `docs/protocol.md` 第 2 节。
+
+视觉侧部署与标定见 `vision/maixcam/README.md`。**注意摄像头 WiFi 密码放在
 `secret_config.py`（已被 gitignore），不要直接写进 `CONFIG` 后提交。**
 
 ## 编译
 
-### 芯片 A（MSPM0G3507）
+### 循迹板（MSPM0G3507）
 
 用 TI CCS Theia 打开 `mspm0_line_follow/` 目录，或在该目录下命令行编译：
 
@@ -54,24 +60,24 @@ make
 
 `mspm0_line_follow/makefile` 顶部的 `SDK_DIR` / `COMPILER_DIR` / `SYSCONFIG_DIR` 是本机绝对路径，**安装位置不同请只在本地改，不要提交**。
 
-### 芯片 B（STM32F411）
+### 滚球板（STM32F411）
 
 用 Keil MDK（编译器 AC6 / armclang）打开 `stm32f411_ball/MDK-ARM/MOTER.uvprojx`，
-直接 Build：0 错误 0 警告，约 25.8KB（MDK-Lite 32KB 内）。工程由 STM32CubeMX
-生成（`stm32f411_ball/MOTER.ioc`）。控制方案、引脚与串口接口详见
+直接 Build：0 错误 0 警告，约 25.8KB（MDK-Lite **32KB 上限，余量约 6KB，加功能要盯住**）。
+工程由 STM32CubeMX 生成（`stm32f411_ball/MOTER.ioc`）。控制方案、引脚与串口接口详见
 `stm32f411_ball/README.md`，上车测试流程见 `stm32f411_ball/TESTING.md`。
 
-> 注：本芯片与 MaixCam 视觉、芯片 A 的通信目前用 **ASCII 行协议**，已按实际实现
-> 记录在 `docs/protocol.md`（A/R/M/Z/B 五类消息 + XOR 校验），可直接作为联调基线。
-> 是否改用二进制帧见该文档第 6 节。
->
-> **⚠️ 芯片 A 侧尚未实现 UART 与加速度输出**，对接清单见 `docs/protocol.md` 第 4 节。
+> 注：滚球板只接一路串口——**摄像头的 12 字节二进制帧**，帧格式见 `docs/protocol.md` 第 3 节。
+> 固件里另有一套 ASCII 行帧解析（`A`/`R`/`M`/`Z`/`B`），目前无人接线，
+> 仅作台架调试与未来扩展保留，见该文档第 4 节。
 
 ## 协作约定
 
 ### 分支
 
-- `main` 为受保护分支，**不允许直接 push**
+- `main` 是主干。**目前尚未开启 GitHub 分支保护**，技术上可以直接 push —— 但请不要这样做。
+  等协作节奏稳定后，在 Settings → Branches 勾上「Require a pull request before merging」，
+  开了之后连管理员也不能直推，规则才真正生效
 - 每人从 `main` 拉自己的功能分支：`feature/<模块名>`，如 `feature/ball-closed-loop`
 - 推分支 → 网页开 PR → 另一人 review → Merge
 - 每天至少同步一次 `main`，别攒着
