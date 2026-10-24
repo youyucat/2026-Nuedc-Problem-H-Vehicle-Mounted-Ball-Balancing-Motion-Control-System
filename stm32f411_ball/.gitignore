@@ -1,0 +1,5 @@
+# stm32f411_ball 本地补充规则（Keil 产物兜底，根 .gitignore 之外的少量补充）
+# 说明：MDK-ARM/MOTER/ 是 Keil 构建输出目录（axf/hex/o/map/htm 等），
+# 其中 MOTER.sct 构建时会自动重建，不必入库。
+MDK-ARM/MOTER/
+*.htm
