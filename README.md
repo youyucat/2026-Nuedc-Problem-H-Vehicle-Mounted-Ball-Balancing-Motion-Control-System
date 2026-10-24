@@ -12,7 +12,9 @@
 ├── docs/
 │   └── protocol.md              双芯串口通信协议（唯一真相源）
 ├── mspm0_line_follow/           芯片 A：MSPM0G3507 —— 循迹
-└── stm32f411_ball/              芯片 B：STM32F411 —— 滚球平衡
+├── stm32f411_ball/              芯片 B：STM32F411 —— 滚球平衡
+└── vision/
+    └── maixcam/                 MaixCam 视觉：小球检测 + 串口发帧
 ```
 
 ## 双芯分工
@@ -21,8 +23,12 @@
 | --- | --- | --- | --- | --- |
 | A | MSPM0G3507 | 8 路灰度 → 循迹 PD → 差速 → 轮速 PI → TB6612 双直流电机 | `mspm0_line_follow/` | youyucat |
 | B | STM32F411 | 小球位置采集 → 导轨闭环 → 步进电机维持平衡 | `stm32f411_ball/` | jove061 |
+| 视觉 | MaixCam | 管道标定 + 钢球检测 → 12 字节帧（UART1 115200） | `vision/maixcam/` | 共用 |
 
 两颗芯片**不共享任何外设**，只在机械结构上共存；数据交互只走串口，帧格式见 `docs/protocol.md`。
+
+视觉侧部署与标定见 `vision/maixcam/README.md`。**注意 MaixCam 的 WiFi 密码放在
+`secret_config.py`（已被 gitignore），不要直接写进 `CONFIG` 后提交。**
 
 ## 编译
 

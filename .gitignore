@@ -70,6 +70,16 @@ JLinkSettings.ini
 RemoteSystemsTempFiles/
 *.launch
 
+# ---------------- 视觉脚本（MaixCam / Python） ----------------
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+# 私密配置：WiFi 账号密码。只提交 secret_config.example.py 模板
+vision/maixcam/secret_config.py
+secret_config.py
+
 # ---------------- 二进制 / 大文件 ----------------
 *.hex
 *.bin
