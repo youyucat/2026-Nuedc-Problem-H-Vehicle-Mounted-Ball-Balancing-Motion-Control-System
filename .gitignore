@@ -1,4 +1,23 @@
-# ---------- TI CCS 编译产物 ----------
+# ============================================================
+# 仓库级忽略规则 —— 覆盖 TI CCS / Keil MDK / STM32CubeIDE 三套工具链
+# 新增规则请说明属于哪个工程，避免误伤另一颗芯片的源文件
+# ============================================================
+
+# ---------------- 通用 ----------------
+build_log.txt
+*.log
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+.workbuddy/
+~$*
+*.bak
+*~
+
+# ---------------- TI CCS（MSPM0 循迹芯片） ----------------
+# 编译产物
 Debug/
 Release/
 syscfg_build/
@@ -6,40 +25,55 @@ syscfg_build/
 *.o
 *.d
 *.out
-*.map
 *.abs
 *.list
-*.hex
-*.bin
+*.map
 *.lib
 
-# CCS / SysConfig 自动生成文件
+# SysConfig / CCS 自动生成
 *.clangd
 .clangd
-build_log.txt
-*.log
 DeviceFamily*.h
 ti_msp_dl_config.*
 
-# ---------- Eclipse / CCS 工程元数据 ----------
-.settings/org.eclipse.cdt.codan.core.prefs
-.settings/org.eclipse.core.resources.prefs
+# Eclipse 工程元数据（本机相关）
+.settings/
 .launches/
 .metadata/
 *.launch
-.ccsproject.bak
 .externalToolBuilders/
 
-# ---------- 编辑器 ----------
-.vscode/
-.idea/
-*.swp
-*~
+# ---------------- Keil MDK（STM32F411 滚球芯片） ----------------
+# 编译产物
+Objects/
+Listings/
+*.axf
+*.crf
+*.dep
+*.lnp
+*.iex
+*.sct
+*.build_log.htm
+*.map
+JLinkLog.txt
+JLinkSettings.ini
 
-# ---------- 操作系统 ----------
-Thumbs.db
-desktop.ini
-.DS_Store
+# 个人界面布局 / 调试器配置 —— 每人本机不同，必须忽略，否则天天冲突
+*.uvguix.*
+*.uvguix
+*.uvoptx
+*.uvopt
 
-# ---------- 工具 ----------
-.workbuddy/
+# ---------------- STM32CubeIDE ----------------
+.settings/
+.metadata/
+RemoteSystemsTempFiles/
+*.launch
+
+# ---------------- 二进制 / 大文件 ----------------
+*.hex
+*.bin
+*.elf
+*.pdf
+*.zip
+*.7z

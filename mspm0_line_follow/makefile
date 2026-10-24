@@ -13,6 +13,12 @@ TI_TXT := Debug/$(PROJECT).txt
 # SysConfig 生成（genLinker = true），不需要自定义链接脚本
 LINKER_CMD := $(BUILD_DIR)/device_linker.cmd
 
+# cmd.exe 的内置命令（if exist / del / rmdir）只认反斜杠路径，
+# 编译规则里的正斜杠路径没问题，但 clean 必须转换，否则报「系统找不到指定的路径」
+OUTPUT_WIN    := $(subst /,\,$(OUTPUT))
+TI_TXT_WIN    := $(subst /,\,$(TI_TXT))
+BUILD_DIR_WIN := $(subst /,\,$(BUILD_DIR))
+
 CC := "$(COMPILER_DIR)/bin/tiarmclang.exe"
 HEX := "$(COMPILER_DIR)/bin/tiarmhex.exe"
 SYSCONFIG_CLI := "$(SYSCONFIG_DIR)/sysconfig_cli.bat"
@@ -102,6 +108,7 @@ $(TI_TXT): $(OUTPUT)
 	$(HEX) --ti_txt --outfile="$(TI_TXT)" "$(OUTPUT)"
 
 clean:
-	@if exist "$(OUTPUT)" del /q "$(OUTPUT)"
-	@if exist "$(TI_TXT)" del /q "$(TI_TXT)"
-	@if exist "$(BUILD_DIR)" rmdir /s /q "$(BUILD_DIR)"
+	@if exist "$(OUTPUT_WIN)" del /q "$(OUTPUT_WIN)"
+	@if exist "$(TI_TXT_WIN)" del /q "$(TI_TXT_WIN)"
+	@if exist "$(BUILD_DIR_WIN)" rmdir /s /q "$(BUILD_DIR_WIN)"
+	@echo clean done

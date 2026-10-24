@@ -1,0 +1,30 @@
+# 仓库内统一按 LF 存储，避免 Windows / macOS 混用时出现
+# 「只改一行却整个文件变红」的假 diff
+* text=auto
+
+# C 源码：强制 LF 存储，检出时由各人 autocrlf 决定
+*.c      text
+*.h      text
+makefile text
+*.mk     text
+*.md     text
+
+# 工程配置（XML / 文本），两套工具链都要保持可读 diff
+*.syscfg  text
+*.ccxml   text
+*.uvprojx text
+*.ioc     text
+
+# 二进制：禁止任何换行符转换，禁止文本 diff
+*.obj   binary
+*.o     binary
+*.a     binary
+*.lib   binary
+*.out   binary
+*.axf   binary
+*.elf   binary
+*.hex   binary
+*.bin   binary
+*.png   binary
+*.jpg   binary
+*.pdf   binary
