@@ -75,9 +75,20 @@ make
 
 ### 分支
 
-- `main` 是主干。**目前尚未开启 GitHub 分支保护**，技术上可以直接 push —— 但请不要这样做。
-  等协作节奏稳定后，在 Settings → Branches 勾上「Require a pull request before merging」，
-  开了之后连管理员也不能直推，规则才真正生效
+`main` **已开启 GitHub 分支保护**（Settings → Branches，实测有效）：
+
+| 规则 | 状态 |
+| --- | --- |
+| 必须通过 PR 才能改动 | ✅ 直推会报 `GH006: Changes must be made through a pull request` |
+| 至少 1 人 approve | ✅ 不能自己批自己的 PR |
+| 禁止强推 / 禁止删除分支 | ✅ |
+| 新提交会让旧 approve 失效 | ✅ 需要重新审 |
+| 评论未解决不能合并 | ✅ |
+| 管理员强制遵守 | ❌ 管理员保留直推旁路 |
+
+**结论**：协作者（jove061）**无法直接 push main**。仓库管理员（youyucat）
+技术上可以直推，但那只是给紧急情况留的后门——**规则一旦被绕过就没有意义，
+请只在改文档/配置这类不影响固件的情况下使用**。
 - 每人从 `main` 拉自己的功能分支：`feature/<模块名>`，如 `feature/ball-closed-loop`
 - 推分支 → 网页开 PR → 另一人 review → Merge
 - 每天至少同步一次 `main`，别攒着
