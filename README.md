@@ -55,8 +55,11 @@ make
 生成（`stm32f411_ball/MOTER.ioc`）。控制方案、引脚与串口接口详见
 `stm32f411_ball/README.md`，上车测试流程见 `stm32f411_ball/TESTING.md`。
 
-> 注：本芯片与 MaixCam 视觉、芯片 A 的通信目前用 ASCII 过渡帧，
-> `docs/protocol.md` 二进制协议定稿后再对接（见 `stm32f411_ball/README.md`）。
+> 注：本芯片与 MaixCam 视觉、芯片 A 的通信目前用 **ASCII 行协议**，已按实际实现
+> 记录在 `docs/protocol.md`（A/R/M/Z/B 五类消息 + XOR 校验），可直接作为联调基线。
+> 是否改用二进制帧见该文档第 6 节。
+>
+> **⚠️ 芯片 A 侧尚未实现 UART 与加速度输出**，对接清单见 `docs/protocol.md` 第 4 节。
 
 ## 协作约定
 
