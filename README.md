@@ -50,7 +50,13 @@ make
 
 ### 芯片 B（STM32F411）
 
-> 待 jove061 补充：IDE 与版本、编译步骤、产出文件位置。
+用 Keil MDK（编译器 AC6 / armclang）打开 `stm32f411_ball/MDK-ARM/MOTER.uvprojx`，
+直接 Build：0 错误 0 警告，约 25.8KB（MDK-Lite 32KB 内）。工程由 STM32CubeMX
+生成（`stm32f411_ball/MOTER.ioc`）。控制方案、引脚与串口接口详见
+`stm32f411_ball/README.md`，上车测试流程见 `stm32f411_ball/TESTING.md`。
+
+> 注：本芯片与 MaixCam 视觉、芯片 A 的通信目前用 ASCII 过渡帧，
+> `docs/protocol.md` 二进制协议定稿后再对接（见 `stm32f411_ball/README.md`）。
 
 ## 协作约定
 
