@@ -9,8 +9,8 @@
  *   预测：e_pred = e_ema + v·120ms（提前刹车，减少过冲）
  *   PD  ：u = +KP·e_pred + KD·v（无积分；KP=0.22°/mm，KD=0.05°/(mm/s)）
   *   限幅：|x|>40mm 松弛到 ±14° 加速回正，近端 ±10° 防过冲
-  *   偏置：回零偏学习（机械零不水平的常驻小倾角，替代积分，±3°）
-  *   脱困：球准静止 200ms 后发渐宽静摩擦脉冲（近端至 5°、远端至 9°）
+ *   偏置：回零偏学习（机械零不水平的常驻小倾角，替代积分，±4°）
+ *   脱困：球准静止 150ms 后发渐宽静摩擦脉冲（近端至 7.5°、远端至 12°）
   *   约束：输出只朝中心推球（快速滚向中心时允许同侧刹车）
   *   前馈：车主控 A 帧加速度线性映射 mdeg（绕过方向约束直接叠加）
   *   输出：斜率限幅 60°/s（刹车 120°/s，回平 12°/s）+ 启动稳定窗 + 微调死区
@@ -76,19 +76,21 @@ extern "C" {
 #define BALL_V_DIFF_FILTER       (2U)     /* 测速 EMA 除数 */
 #define BALL_VISION_FRAME_MS     (20U)    /* 视觉标称帧周期 */
 
-/* 静摩擦脱困脉冲：球准静止(≥1.5mm 且 |v|≤8mm/s)持续 200ms 后，
- * 发"斜坡-保持-卸力"脉冲（300/250/100ms），幅度逐脉冲递增，球一动即收 */
+/* 静摩擦脱困脉冲：球准静止(≥1.5mm 且 |v|≤8mm/s)持续 150ms 后，
+ * 发"斜坡-保持-卸力"脉冲（300/250/100ms），幅度逐脉冲递增，球一动即收。
+ * 幅度按"静摩擦偏大"的台架现状定：近端最高 7.5°、远端最高 12°，
+ * 仍低于远端松弛限幅 14°；若出现把球踢过冲，先降 STEP。 */
 #define BALL_STICTION_POS_01MM   (15)
 #define BALL_STICTION_VEL_MM_S   (8)
-#define BALL_STICTION_HOLD_MS    (200U)
+#define BALL_STICTION_HOLD_MS    (150U)
 #define BALL_STICK_TRANSIT_POS_01MM (100) /* ≥10mm 算远端行程 */
 #define BALL_STICK_TRANSIT_VEL   (18)
-#define BALL_STICK_NEAR_BOOST    (4500)   /* 近端首脉冲 4.5° */
-#define BALL_STICK_NEAR_STEP     (250)    /* 每脉冲 +0.25° */
-#define BALL_STICK_NEAR_MAX      (5000)   /* 近端上限 5° */
-#define BALL_STICK_TRA_BOOST     (3000)   /* 远端首脉冲 3° */
-#define BALL_STICK_TRA_STEP      (1000)   /* 每脉冲 +1° */
-#define BALL_STICK_TRA_MAX       (9000)   /* 远端上限 9° */
+#define BALL_STICK_NEAR_BOOST    (5000)   /* 近端首脉冲 5° */
+#define BALL_STICK_NEAR_STEP     (500)    /* 每脉冲 +0.5° */
+#define BALL_STICK_NEAR_MAX      (7500)   /* 近端上限 7.5° */
+#define BALL_STICK_TRA_BOOST     (4000)   /* 远端首脉冲 4° */
+#define BALL_STICK_TRA_STEP      (1500)   /* 每脉冲 +1.5° */
+#define BALL_STICK_TRA_MAX       (12000)  /* 远端上限 12° */
 #define BALL_STICK_RAMP_MS       (300U)
 #define BALL_STICK_HOLD_MS       (250U)
 #define BALL_STICK_RELEASE_MS    (100U)
@@ -102,8 +104,8 @@ extern "C" {
 #define BALL_BIAS_MAX_VEL_MM_S   (15)
 #define BALL_BIAS_CONFIRM_MS     (150U)
 #define BALL_BIAS_KI             (120)    /* mdeg/s 每 0.1mm 偏差 */
-#define BALL_BIAS_MAX_RATE       (400)    /* mdeg/s */
-#define BALL_BIAS_LIMIT_MDEG     (3000)
+#define BALL_BIAS_MAX_RATE       (600)    /* mdeg/s（静摩擦大，加快积累） */
+#define BALL_BIAS_LIMIT_MDEG     (4000)   /* ±4°（静摩擦大需更大常驻倾角） */
 #define BALL_BIAS_FLIP_POS_01MM  (25)
 #define BALL_BIAS_FLIP_RETAIN    (70)     /* %（球换边时偏置保留比例） */
 
