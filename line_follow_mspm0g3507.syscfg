@@ -1,0 +1,113 @@
+/**
+ * 循迹专用工程（双芯架构中的「循迹芯片」）
+ *
+ * 只声明本工程实际用到的外设：SYSCTL 时钟树 + SysTick + ADC0（灰度 MUX 输出）。
+ *
+ * 没有 UART / I2C / DMA / 定时器：
+ *   - TB6612 的 PWM 用 TIMA1，在 bsp/board.c 里用手写 DriverLib 初始化
+ *     （不是 SysConfig 实例，所以这里没有 Timer 模块）；
+ *   - 灰度 MUX 地址线 AD0-2 / EN / ERR、TB6612 方向脚、左右轮编码器脚
+ *     全部是 bsp/board.c 里手写的 GPIO，不在 .syscfg 里；
+ *   - ADC 走「MEM0_RESULT_LOADED 中断逐次读值」这条路（见 bsp/board.c），
+ *     不用 FIFO/DMA —— 生成代码里若开 FIFO/DMA，实机上帧永不完成。
+ */
+//@cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default"
+//@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)"
+// @cliArgs --board /ti/boards/LP_MSPM0G3507 --rtos nortos
+
+/**
+ * Import the modules used in this configuration.
+ */
+const SYSCTL  = scripting.addModule("/ti/driverlib/SYSCTL");
+const SYSTICK = scripting.addModule("/ti/driverlib/SYSTICK");
+const ADC12   = scripting.addModule("/ti/driverlib/ADC12", {}, false);
+const ADC0    = ADC12.addInstance();
+const ProjectConfig = scripting.addModule("/ti/project_config/ProjectConfig");
+
+/**
+ * Write custom configuration values to the imported modules.
+ */
+
+const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
+
+/* 链接脚本交给 SysConfig 生成（本工程没有 Flash 参数区，不需要自定义
+ * 链接脚本）；启动文件用工程根目录那份 startup_mspm0g350x_ticlang.c 副本。
+ * 注意 logLinker 生成的是 device_linker.cmd，makefile 直接引用它。 */
+ProjectConfig.genLinker  = true;
+ProjectConfig.genStartup = false;
+scripting.suppress("All four File Generation options must be enabled in order to guarantee Device Migration support\\. If an option is disabled, the user must manually configure that setting on its own file\\.", ProjectConfig);
+
+/* 与源工程保持一致的时钟门，避免提频后某些总线路径被关掉。 */
+const mfclk  = system.clockTree["MFCLKGATE"];
+mfclk.enable  = true;
+const mfpclk = system.clockTree["MFPCLKGATE"];
+mfpclk.enable = true;
+
+/* Run MCLK at 80 MHz via SYSPLL (driverlib/sysctl_mclk_syspll):
+ * SYSOSC(32)/PDIV2 * QDIV10 = 160 MHz VCO, CLK2X = 80 MHz -> HSCLK -> MCLK.
+ * ULPCLK = MCLK/2 = 40 MHz stays in spec. SysConfig derives the flash wait
+ * state (2) and the timer bus divider from this clock tree automatically. */
+const divider5       = system.clockTree["PLL_CLK1_DIV"];
+divider5.divideValue = 4;
+
+const divider6       = system.clockTree["PLL_CLK2X_DIV"];
+divider6.divideValue = 4;
+
+const divider7        = system.clockTree["PLL_PDIV"];
+divider7.divideValue  = 2;
+
+const divider9       = system.clockTree["UDIV"];
+divider9.divideValue = 2;
+
+const gate4  = system.clockTree["EXCLKGATE"];
+gate4.enable = true;
+
+const multiplier2         = system.clockTree["PLL_QDIV"];
+multiplier2.multiplyValue = 10;
+
+const mux3       = system.clockTree["EXCLKMUX"];
+mux3.inputSelect = "EXCLKMUX_PLLCLK1_OUT";
+
+const mux8       = system.clockTree["HSCLKMUX"];
+mux8.inputSelect = "HSCLKMUX_SYSPLL2X";
+
+SYSCTL.MCLKSource        = "HSCLK";
+SYSCTL.EXCLKSource       = "SYSPLLOUT1";
+SYSCTL.SYSPLL_CLK1En     = true;
+SYSCTL.enableEXCLK       = true;
+SYSCTL.SYSPLL_CLK2XEn    = true;
+SYSCTL.SYSPLL_CLK2XDiv   = 1;
+SYSCTL.HSCLKSource       = "SYSPLLCLK2X";
+SYSCTL.validateClkStatus = true;
+SYSCTL.SYSPLL_Qdiv       = 5;
+SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.clockTreeEn        = true;
+
+/* SysTick 1 ms tick at 80 MHz -> hal_time_millis(). */
+SYSTICK.period          = 80000;
+SYSTICK.periodEnable    = true;
+SYSTICK.systickEnable   = true;
+SYSTICK.interruptEnable = true;
+
+/* Gray sensor front end: one channel of the external 8:1 MUX is wired to
+ * PA27/ADC0_CH0. Repeat mode keeps the converter running while a frame is in
+ * progress; the value is read by the MEM0_RESULT_LOADED interrupt
+ * (bsp/board.c: ADC0_IRQHandler), so no FIFO and no DMA are configured. */
+ADC0.$name                             = "ADC_0";
+ADC0.adcMem0_name                      = "GRAY_OUT";
+ADC0.adcMem0chansel                    = "DL_ADC12_INPUT_CHAN_0";
+ADC0.endAdd                            = 0;
+ADC0.repeatMode                        = true;
+ADC0.powerDownMode                     = "DL_ADC12_POWER_DOWN_MODE_MANUAL";
+ADC0.enableFIFO                        = false;
+ADC0.configureDMA                      = false;
+ADC0.adcPin0Config.$name               = "GRAY_OUT_ADC_PIN";
+ADC0.adcPin0Config.hideOutputInversion = scripting.forceWrite(false);
+ADC0.peripheral.$assign                = "ADC0";
+ADC0.peripheral.adcPin0.$assign        = "PA27";
+
+Board.peripheral.$suggestSolution          = "DEBUGSS";
+Board.peripheral.swclkPin.$suggestSolution = "PA20";
+Board.peripheral.swdioPin.$suggestSolution = "PA19";
+ADC0.peripheral.$suggestSolution           = "ADC0";
+ADC0.peripheral.adcPin0.$suggestSolution   = "PA27";

@@ -1,0 +1,45 @@
+# ---------- TI CCS 编译产物 ----------
+Debug/
+Release/
+syscfg_build/
+*.obj
+*.o
+*.d
+*.out
+*.map
+*.abs
+*.list
+*.hex
+*.bin
+*.lib
+
+# CCS / SysConfig 自动生成文件
+*.clangd
+.clangd
+build_log.txt
+*.log
+DeviceFamily*.h
+ti_msp_dl_config.*
+
+# ---------- Eclipse / CCS 工程元数据 ----------
+.settings/org.eclipse.cdt.codan.core.prefs
+.settings/org.eclipse.core.resources.prefs
+.launches/
+.metadata/
+*.launch
+.ccsproject.bak
+.externalToolBuilders/
+
+# ---------- 编辑器 ----------
+.vscode/
+.idea/
+*.swp
+*~
+
+# ---------- 操作系统 ----------
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---------- 工具 ----------
+.workbuddy/

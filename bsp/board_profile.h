@@ -1,0 +1,71 @@
+#ifndef BSP_BOARD_PROFILE_H
+#define BSP_BOARD_PROFILE_H
+
+/* Hardware-only adaptation file. Keep control behavior in
+ * config/template_config.h and change routing, channel order and positions
+ * here when moving the template to another board.
+ *
+ * 本工程只保留「循迹芯片」用到的硬件：8 路灰度（MUX + ADC）、TB6612 双电机、
+ * 左右车轮编码器。源工程里的 IMU/OLED（I2C1）与 D36A 步进（TIMG0/TIMG8/
+ * TIMG12 + DIR/EN/Z）接线定义已删除 —— 那些属于另一颗芯片。 */
+#define BOARD_PROFILE_SENSOR_CHANNELS 8U
+
+#define GRAY_AD0_PORT       GPIOB
+#define GRAY_AD0_PIN        DL_GPIO_PIN_10
+#define GRAY_AD0_IOMUX      IOMUX_PINCM27
+#define GRAY_AD1_PORT       GPIOB
+#define GRAY_AD1_PIN        DL_GPIO_PIN_11
+#define GRAY_AD1_IOMUX      IOMUX_PINCM28
+#define GRAY_AD2_PORT       GPIOB
+#define GRAY_AD2_PIN        DL_GPIO_PIN_12
+#define GRAY_AD2_IOMUX      IOMUX_PINCM29
+#define GRAY_EN_PORT        GPIOB
+#define GRAY_EN_PIN         DL_GPIO_PIN_13
+#define GRAY_EN_IOMUX       IOMUX_PINCM30
+#define GRAY_ERR_PORT       GPIOB
+#define GRAY_ERR_PIN        DL_GPIO_PIN_14
+#define GRAY_ERR_IOMUX      IOMUX_PINCM31
+#define GRAY_ENABLE_ACTIVE_LOW 1U
+#define GRAY_ADDRESS_ACTIVE_LOW 1U
+
+#define GRAY_ADC_INST       ADC_0_INST
+#define GRAY_ADC_IOMUX      GPIO_ADC_0_IOMUX_C0
+#define GRAY_ADC_MEM        ADC_0_ADCMEM_GRAY_OUT
+#define GRAY_ADC_INPUT      DL_ADC12_INPUT_CHAN_0
+
+#define MOTOR_PWM_INST       TIMA1
+#define MOTOR_PWM_PORT       GPIOB
+#define MOTOR_LEFT_PWM_PIN   DL_GPIO_PIN_2
+#define MOTOR_LEFT_PWM_IOMUX IOMUX_PINCM15
+#define MOTOR_LEFT_PWM_FUNC  IOMUX_PINCM15_PF_TIMA1_CCP0
+#define MOTOR_RIGHT_PWM_PIN  DL_GPIO_PIN_3
+#define MOTOR_RIGHT_PWM_IOMUX IOMUX_PINCM16
+#define MOTOR_RIGHT_PWM_FUNC IOMUX_PINCM16_PF_TIMA1_CCP1
+#define MOTOR_DIRECTION_PORT GPIOA
+#define MOTOR_AIN1_PIN       DL_GPIO_PIN_14
+#define MOTOR_AIN1_IOMUX     IOMUX_PINCM36
+#define MOTOR_AIN2_PIN       DL_GPIO_PIN_15
+#define MOTOR_AIN2_IOMUX     IOMUX_PINCM37
+#define MOTOR_STBY_HARDWIRED 1U
+#define MOTOR_BIN1_PIN       DL_GPIO_PIN_16
+#define MOTOR_BIN1_IOMUX     IOMUX_PINCM38
+#define MOTOR_BIN2_PIN       DL_GPIO_PIN_17
+#define MOTOR_BIN2_IOMUX     IOMUX_PINCM39
+
+#define ENCODER_PORT         GPIOB
+#define ENCODER_INT_IRQN     GPIOB_INT_IRQn
+#define ENCODER_LEFT_A_PIN   DL_GPIO_PIN_8
+#define ENCODER_LEFT_A_IOMUX IOMUX_PINCM25
+#define ENCODER_LEFT_B_PIN   DL_GPIO_PIN_9
+#define ENCODER_LEFT_B_IOMUX IOMUX_PINCM26
+#define ENCODER_RIGHT_A_PIN  DL_GPIO_PIN_6
+#define ENCODER_RIGHT_A_IOMUX IOMUX_PINCM23
+#define ENCODER_RIGHT_B_PIN  DL_GPIO_PIN_7
+#define ENCODER_RIGHT_B_IOMUX IOMUX_PINCM24
+
+#define BOARD_SENSOR_OUTPUT_MAP \
+    { 7U, 5U, 6U, 4U, 3U, 1U, 2U, 0U }
+#define BOARD_SENSOR_POSITION_MAP \
+    { -3500, -2500, -1500, -500, 500, 1500, 2500, 3500 }
+
+#endif
