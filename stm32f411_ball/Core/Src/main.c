@@ -59,8 +59,12 @@ UART_HandleTypeDef huart1;
 #define USE_DEBUG_UART6  1     /* 板载调试口在 PC6/PC7(USART6) 时置 1 */
 
 /* 第二路调试串口：实际板子的调试口接在 PC6/PC7（USART6，AF8），
- * 而 USART1 的 PA9 未必引出。两路同时输出，USB-TTL 接哪边都能看到日志。 */
+ * 而 USART1 的 PA9/PA10 是与 MaixCam + 车主控的协议链路。
+ *
+ * 调试口既发日志也收命令：收到的字节注入 ball_ctrl 的解析环形缓冲，
+ * 这样台架调试时直接从这个口发 M/Z/R 命令即可，不用挪线到 PA10。 */
 UART_HandleTypeDef huart6;
+uint8_t            dbg_rx_byte;   /* USART6 单字节中断接收缓冲 */
 
 /* ==================== H题 要求4：行驶稳球任务 ====================
  * 小车置于 A 点、钢球置于中心 O，按键启动后沿黑线顺时针行驶通过 B
@@ -180,6 +184,11 @@ static void dbg_uart6_init(void)
     huart6.Init.HwFlowCtl    = UART_HWCONTROL_NONE;
     huart6.Init.OverSampling = UART_OVERSAMPLING_16;
     (void)HAL_UART_Init(&huart6);
+
+    /* 与 USART1 同优先级，开启接收中断，才能从调试口发命令 */
+    HAL_NVIC_SetPriority(USART6_IRQn, 4, 0);
+    HAL_NVIC_EnableIRQ(USART6_IRQn);
+    (void)HAL_UART_Receive_IT(&huart6, &dbg_rx_byte, 1U);
 }
 #endif
 /* USER CODE END 0 */

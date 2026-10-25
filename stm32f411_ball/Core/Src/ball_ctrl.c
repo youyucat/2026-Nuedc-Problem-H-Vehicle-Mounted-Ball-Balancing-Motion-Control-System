@@ -761,9 +761,9 @@ void ball_ctrl_tick_10ms(void)
     uint8_t  link_fresh, det_valid, hold;
     int32_t  requested = 0, lim;
 
-    if (!s_running) return;
-
-    /* ---------- 台架手动：直接输出指定角度（不需要视觉） ---------- */
+    /* ---------- 台架手动：直接输出指定角度（不需要视觉） ----------
+     * 注意：这一段必须在 s_running 检查之前。手动摆角是纯开环调试手段，
+     * 标定时不想启动闭环（旧增益已失效）也能发 M 命令看摆杆实际倾角。 */
     if (s_manual) {
         s_fb_mdeg = 0;
         s_ff_mdeg = 0;
@@ -775,6 +775,8 @@ void ball_ctrl_tick_10ms(void)
         apply_angle_output();
         return;
     }
+
+    if (!s_running) return;
 
     /* ---------- 链路 / 检出有效性 ---------- */
     age = now - s_good_tick;

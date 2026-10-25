@@ -62,6 +62,8 @@ extern TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN EV */
 extern UART_HandleTypeDef huart1;
+extern UART_HandleTypeDef huart6;   /* 调试口 PC6/PC7：日志输出 + 命令输入 */
+extern uint8_t dbg_rx_byte;         /* USART6 单字节接收缓冲（main.c 定义） */
 /* USER CODE END EV */
 
 /******************************************************************************/
@@ -266,6 +268,14 @@ void USART1_IRQHandler(void)
 }
 
 /**
+  * @brief 调试口 USART6 中断（PC6/PC7）
+  */
+void USART6_IRQHandler(void)
+{
+  HAL_UART_IRQHandler(&huart6);
+}
+
+/**
   * @brief 接收完成回调：取走这一个字节，再挂起下一次接收
   */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -274,6 +284,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   {
     ball_ctrl_uart_rx_isr(ball_ctrl_uart_rx_byte());
     ball_ctrl_uart_start_rx();
+  }
+  else if (huart->Instance == USART6)
+  {
+    /* 调试口收到的字节注入同一个解析环形缓冲，主循环里照常解析。
+     * 这样台架调试时不用把 USB-TTL 挪到 PA10 才能发 M/Z/R 命令。 */
+    ball_ctrl_uart_rx_isr(dbg_rx_byte);
+    (void)HAL_UART_Receive_IT(&huart6, &dbg_rx_byte, 1U);
   }
 }
 
@@ -285,6 +302,10 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
   if (huart->Instance == USART1)
   {
     ball_ctrl_uart_start_rx();
+  }
+  else if (huart->Instance == USART6)
+  {
+    (void)HAL_UART_Receive_IT(&huart6, &dbg_rx_byte, 1U);
   }
 }
 

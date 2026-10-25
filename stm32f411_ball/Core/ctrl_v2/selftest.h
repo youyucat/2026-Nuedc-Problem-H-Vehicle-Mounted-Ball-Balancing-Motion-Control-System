@@ -25,9 +25,10 @@
 extern "C" {
 #endif
 
-/* 1 = 启用自检（正常控制让位）；0 = 完全不编译进固件 */
+/* 1 = 启用自检（正常控制让位）；0 = 完全不编译进固件
+ * 标定已完成，已关闭。需要复核标定时再改回 1。 */
 #ifndef BALL_SELFTEST_ENABLE
-#define BALL_SELFTEST_ENABLE   (1)
+#define BALL_SELFTEST_ENABLE   (0)
 #endif
 
 void selftest_init(void);
