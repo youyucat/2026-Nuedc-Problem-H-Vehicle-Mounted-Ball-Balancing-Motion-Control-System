@@ -532,9 +532,12 @@ static int32_t control_update(uint32_t dt_ms)
     stick = 0;                                   /* ctrl_v2 自带静摩擦管理 */
     combined = pd + stick;
 
-    /* 遥测：让旧接口仍能反映出新控制器的内部量 */
-    s_fb_mdeg = ball_v2_fb(&s_v2);
-    s_sat     = ball_v2_sat(&s_v2);
+    /* 遥测必须用 ctrl_v2 内部量。否则日志里的 v 是旧 PD 的测速、
+     * fb 也对不上 ctrl_v2 的实际计算，调试时会被误导。 */
+    s_fb_mdeg    = ball_v2_fb(&s_v2);
+    s_sat        = ball_v2_sat(&s_v2);
+    s_v_est      = ball_v2_vel(&s_v2);
+    s_x_ema_01mm = ball_v2_pos(&s_v2);
 #elif BALL_USE_LQR
     /* --- LQR 状态反馈 + 积分增广（Core/lqr/，推导见 README_LQR.md） --- */
     err = s_x_ema_01mm - s_xref_01mm;
