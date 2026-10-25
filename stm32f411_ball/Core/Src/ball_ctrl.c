@@ -1,8 +1,12 @@
 /**
   ******************************************************************************
   * @file    ball_ctrl.c
-  * @brief   H 题要求4：摆杆稳球控制（滑模 PD + 回零偏学习 + 静摩擦脱困脉冲）
-  *          移植自成熟参考工程 empty_LP_MSPM0G3507（ball_balance 控制模式1），
+  * @brief   H 题要求4：摆杆稳球控制
+  *          控制律二选一（BALL_USE_LQR，见 ball_ctrl.h）：
+  *            0 = 滑模 PD + 回零偏学习 + 静摩擦脱困脉冲（默认，
+  *                移植自成熟参考工程 empty_LP_MSPM0G3507 ball_balance 控制模式1）
+  *            1 = LQR 状态反馈 + 积分增广 + 静摩擦脱困脉冲（Core/lqr/，
+  *                原理与整定见 Core/lqr/README_LQR.md）
   *          并适配本工程机械约定（+角度 = 摆杆 +x 端/画面左端抬高）。
   *
   * 与参考工程的差异（其余逐行对应移植）：
@@ -39,6 +43,7 @@
   */
 
 #include "ball_ctrl.h"
+#include "ball_lqr.h"
 #include "stepper.h"
 #include "main.h"
 #include <stdlib.h>
@@ -337,8 +342,10 @@ static int32_t active_angle_limit(int32_t err01)
 
 /* 回零偏学习：机械零不水平需要常驻小倾角顶着（替代积分项）。
  * 球准静止且偏离目标 1.5~60mm、|v|≤15mm/s 持续 150ms 后慢速积累；
- * ±3° 限幅、±4°/s 限速；球换边（|e|>2.5mm 处符号翻转）保留 70%，
- * 缓慢洗掉学错的方向。 */
+ * ±4° 限幅、±6°/s 限速；球换边（|e|>2.5mm 处符号翻转）保留 70%，
+ * 缓慢洗掉学错的方向。
+ * （仅滑模 PD 模式编译：LQR 模式由积分项替代，见 ball_lqr.c） */
+#if !BALL_USE_LQR
 static void settle_bias_update(int32_t err01, int32_t v, uint32_t dt_ms)
 {
     uint8_t eligible;
@@ -377,11 +384,12 @@ static void settle_bias_update(int32_t err01, int32_t v, uint32_t dt_ms)
         if (decay >= s_bias_ms) s_bias_ms = 0U; else s_bias_ms -= decay;
     }
 }
+#endif /* !BALL_USE_LQR */
 
 /* 静摩擦脱困：持续饱和倾角可能把粘滞球一直顶死；改成"斜坡-保持-卸力"
  * 脉冲，让管在两次尝试间卸力，逐脉冲加宽直到突破真实启动摩擦阈值，
- * 球一动立即收力。近端（|e|<10mm）首脉冲 4.5°、每脉冲 +0.25°、上限 5°；
- * 远端首脉冲 3°、每脉冲 +1°、上限 9°，并记忆上次脱困幅度的 90%。 */
+ * 球一动立即收力。近端（|e|<10mm）首脉冲 5°、每脉冲 +0.5°、上限 7.5°；
+ * 远端首脉冲 4°、每脉冲 +1.5°、上限 12°，并记忆上次脱困幅度的 90%。 */
 static int32_t stiction_recovery_output(int32_t err01, int32_t v, uint32_t dt_ms)
 {
     int32_t  out = 0;
@@ -462,11 +470,15 @@ static int32_t constrain_to_ball_side(int32_t target_mdeg, int32_t err01,
     return target_mdeg;
 }
 
-/* 新视觉帧：滤波/测速 + 滑模 PD + 偏置 + 脱困脉冲，返回反馈项输出 mdeg。
- * dt_ms = 距上次控制律的实测间隔（≈帧周期）。 */
+/* 新视觉帧：滤波/测速 + 控制律 + 脱困脉冲，返回反馈项输出 mdeg。
+ * dt_ms = 距上次控制律的实测间隔（≈帧周期）。
+ * 控制律二选一（BALL_USE_LQR，见 ball_ctrl.h 配置区）：
+ *   滑模 PD：预测误差 e_pred = e + v·120ms → PD + 回零偏学习
+ *   LQR    ：原始误差（真实状态反馈，前推会与 v 项双重计阻尼）→
+ *            K1·e + K2·v + KI·∫e（积分在 ball_lqr 内部，替代偏置学习） */
 static int32_t control_update(uint32_t dt_ms)
 {
-    int32_t pred, err, p, d, pd, combined, out, lim, stick;
+    int32_t err, pd, combined, out, lim, stick;
 
     if (!s_filter_ready) {
         /* 首帧/重捕获：位置直接种入，测速清零（防差分踢跳） */
@@ -481,22 +493,40 @@ static int32_t control_update(uint32_t dt_ms)
         s_v_est = estimate_ball_velocity(s_ball_01mm, s_frame_cnt, dt_ms);
     }
 
-    /* 预测：位置前推 120ms（提前刹车）；滑模变量 = 相对目标的偏差 */
-    pred = s_x_ema_01mm + (int32_t)(((int64_t)s_v_est * BALL_LOOKAHEAD_MS) / 100);
-    err  = pred - s_xref_01mm;
+#if BALL_USE_LQR
+    /* --- LQR 状态反馈 + 积分增广（Core/lqr/，推导见 README_LQR.md） --- */
+    err = s_x_ema_01mm - s_xref_01mm;
     if (abs_i32(err) <= BALL_CENTER_DEADBAND_01MM) err = 0;
 
-    /* 本工程 +角抬高 +x 端：正偏差需正角往回推（参考工程机械方向相反） */
-    p = (int32_t)(((int64_t)BALL_PD_KP_MDEG_PER_MM * err) / 10);
-    d = (int32_t)((int64_t)BALL_PD_KD_MDEG_PER_MM_S * s_v_est);
-
     lim = active_angle_limit(err);
-    pd  = clamp_i32(p + d, -lim, lim);
-
-    settle_bias_update(err, s_v_est, dt_ms);
+    pd    = clamp_i32(ball_lqr_update(err, s_v_est, dt_ms, lim), -lim, lim);
     stick = stiction_recovery_output(err, s_v_est, dt_ms);
 
-    combined  = pd + s_bias_mdeg + stick;
+    combined = pd + stick;      /* 积分项已含稳态补偿，不叠加偏置学习 */
+#else
+    /* --- 滑模 PD + 回零偏学习（默认路径，与参考设计一致） --- */
+    {
+        int32_t pred, p, d;
+
+        /* 预测：位置前推 120ms（提前刹车）；滑模变量 = 相对目标的偏差 */
+        pred = s_x_ema_01mm + (int32_t)(((int64_t)s_v_est * BALL_LOOKAHEAD_MS) / 100);
+        err  = pred - s_xref_01mm;
+        if (abs_i32(err) <= BALL_CENTER_DEADBAND_01MM) err = 0;
+
+        /* 本工程 +角抬高 +x 端：正偏差需正角往回推（参考工程机械方向相反） */
+        p = (int32_t)(((int64_t)BALL_PD_KP_MDEG_PER_MM * err) / 10);
+        d = (int32_t)((int64_t)BALL_PD_KD_MDEG_PER_MM_S * s_v_est);
+
+        lim = active_angle_limit(err);
+        pd  = clamp_i32(p + d, -lim, lim);
+
+        settle_bias_update(err, s_v_est, dt_ms);
+        stick = stiction_recovery_output(err, s_v_est, dt_ms);
+
+        combined  = pd + s_bias_mdeg + stick;
+    }
+#endif
+
     out       = clamp_i32(combined, -lim, lim);
     s_sat     = (abs_i32(combined) > lim) ? 1U : 0U;
     s_fb_mdeg = out;
@@ -523,6 +553,9 @@ static void reset_control_state(void)
     s_stick_ms = 0U;
     s_stick_boost = 0;
     s_stick_memory = 0;
+#if BALL_USE_LQR
+    ball_lqr_reset();        /* LQR 模式：积分状态一并清零 */
+#endif
     s_req_mdeg = 0;
     s_fb_mdeg = 0;
     s_ff_mdeg = 0;

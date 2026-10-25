@@ -153,7 +153,7 @@
 | 回中太慢 | 加 `BALL_PD_KP_MDEG_PER_MM`（220 → 300），或加大 `BALL_RETURN_MAX_MDEG`（14000 → 16000） |
 | 回中过冲/来回振荡 | 加 `BALL_PD_KD_MDEG_PER_MM_S`（50 → 80）或减 KP |
 | 稳态停偏，偏置学习救不回 | 确认 `BALL_BIAS_*` 参数没被改小；机械零太歪就先停机调平再发 `Z` |
-| 球粘住不动、脉冲推不开 | 加大 `BALL_STICK_NEAR_BOOST`（4500 → 5500）与 `BALL_STICK_NEAR_MAX` |
+| 球粘住不动、脉冲推不开 | 已加强（近端首脉冲 5°→上限 7.5°、远端 4°→上限 12°、150ms 即启动）：仍推不开就继续加 `BALL_STICK_TRA_MAX`（12000 → 14000）；若出现踢过冲，先减 `BALL_STICK_NEAR_STEP`（500 → 250） |
 | 稳定球摆杆小幅抖 | 加大 `BALL_TARGET_DEADBAND`（120 → 200） |
 | `sat=1` 频繁出现 | 反馈项在撞 ±10°/±14° 限幅——球被放太远或 KP 太大 |
 | 启动瞬间猛摆 | 确认 `BALL_ENABLE_SETTLE_MS=400` 生效（ MaixCam 标定完成前本就不出力） |
