@@ -53,9 +53,16 @@ extern UART_HandleTypeDef huart1;
 
 /* ===================== 机械换算 ===================== */
 
-/* 摆杆每度对应多少步进脉冲。默认步进直连摆杆（1:1）；
- * 若有减速齿轮/曲柄连杆，把实测传动比乘上来，例如 1:3 → * 3.0f */
-#define ROD_STEPS_PER_DEG   ((float)STEPPER_STEPS_PER_REV / 360.0f * ROD_DIR_SIGN)
+/* 摆杆每真实 1 度对应多少步进脉冲。
+ *
+ * 2026-10-25 水平仪标定：电机轴到摆杆有 15:1 机械减速（见 stepper.h 的
+ * STEPPER_GEAR_RATIO）。此前按 1:1 计算，导致所有角度指令实际只执行了
+ * 1/15 —— 以为发 5 度，摆杆只倾 0.33 度。这是整套控制参数调不好的根因。
+ *
+ * 修正后本宏把「摆杆真实角度(mdeg)」正确换算成脉冲数：
+ *   5 度 = 5000 mdeg -> 333 步 -> 摆杆真实倾斜 5 度。 */
+#define ROD_STEPS_PER_DEG   ((float)STEPPER_STEPS_PER_REV / 360.0f \
+                             * STEPPER_GEAR_RATIO * ROD_DIR_SIGN)
 
 #define CTRL_DT_MS          10U         /* 控制周期 ms（tick_10ms 调用） */
 

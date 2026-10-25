@@ -35,17 +35,18 @@ extern uint8_t  stepper_is_busy(void);
  * 自检输出绝不能发到那里，否则会污染 12 字节二进制帧。 */
 extern UART_HandleTypeDef huart6;
 
-/* 注意：这里仍用工程原有的换算系数（1600 步/圈 = 4.444 步/度）。
- * 本测试的目的就是测出它与真实倾角的偏差，所以不能先改它。 */
-#define ROD_STEPS_PER_DEG   ((float)STEPPER_STEPS_PER_REV / 360.0f)
+/* 换算系数已按 2026-10-25 的水平仪标定修正：电机轴到摆杆 15:1 机械减速
+ * （见 stepper.h 的 STEPPER_GEAR_RATIO）。因此下面的命令角就是摆杆的
+ * 真实倾角，自检可以用来复核标定是否正确。 */
+#define ROD_STEPS_PER_DEG   ((float)STEPPER_STEPS_PER_REV / 360.0f \
+                             * STEPPER_GEAR_RATIO)
 
 /* ================== 测试参数：想改档位只改这一段 ================== */
 
-/* 命令角序列（mdeg）。由小到大，避免一上来就大幅摆动。
- * 按 12.5:1 的估计，这五档约对应真实 2 / 3.2 / 4.4 / 5.6 / 6.8 度，
- * 覆盖足够宽，水平仪 1 度分辨率下拟合斜率误差约 ±5%。 */
+/* 命令角序列（mdeg）= 摆杆真实倾角。标定修正后取值回到物理合理范围，
+ * 用来复核「发 N 度，水平仪是否读到 N 度」。 */
 static const int32_t TEST_ANGLES[] = {
-    25000, 40000, 55000, 70000, 85000
+    1000, 2000, 3000, 4000, 5000
 };
 #define TEST_N   (sizeof(TEST_ANGLES) / sizeof(TEST_ANGLES[0]))
 

@@ -64,16 +64,31 @@ extern "C" {
 
 /* --- 参考设计控制参数（移植自 MSPM0 ball_balance，滑模 PD） ---------------- */
 
+/* ⚠️ 2026-10-25 标定修正后的状态：本段以 mdeg 为单位的参数全部失效！
+ *
+ * 水平仪标定确认电机轴到摆杆有 15:1 机械减速（stepper.h 的
+ * STEPPER_GEAR_RATIO）。修正 ROD_STEPS_PER_DEG 之后，alpha_cmd 的数值
+ * 第一次真正等于摆杆倾角 —— 也就是说同样 220 mdeg/mm 的增益，实际作用
+ * 到球上的力度变成了标定前的 15 倍。下面所有角度类参数（KP/KD/限幅/
+ * 脱困脉冲/偏置限幅/死区）都还是「旧假角度」下试出来的值，直接跑必然
+ * 过冲或撞限位。
+ *
+ * 处置：闭环暂不可用，等 ctrl_v2（Core/ctrl_v2/，参数按真实角度整定）
+ * 接入后再跑。在此之前只用开环 M 命令验证标定。
+ *
+ * 若要临时恢复旧行为，把下面所有角度参数除以 15 即可。 */
+
 /* PD 增益：u = +KP·e_pred + KD·v（mdeg；无积分，稳态偏差由回零偏学习消除）。
  * e = 球相对目标偏差。注意：参考工程机械上 +角压低 +x 端（其律为 -KP·x）；
  * 本工程台架实测 +角抬高 +x 端（M,2000 测试），移植时 P/D 已翻转符号。
  * 整定：回中慢加 KP；过冲/振荡加 KD 或减 KP。 */
-#define BALL_PD_KP_MDEG_PER_MM   (220)    /* 0.22°/mm */
-#define BALL_PD_KD_MDEG_PER_MM_S (50)     /* 0.05°/(mm/s) */
+#define BALL_PD_KP_MDEG_PER_MM   (220)    /* 0.22°/mm（旧标定值，见上方警告） */
+#define BALL_PD_KD_MDEG_PER_MM_S (50)     /* 0.05°/(mm/s)（旧标定值） */
 
-/* 角度限幅：远端松弛加速回正，近端收紧防过冲（"先大幅回正再微调"） */
-#define BALL_CONTROL_MAX_MDEG    (10000)  /* 常规限幅 ±10° */
-#define BALL_RETURN_MAX_MDEG     (14000)  /* 远端限幅 ±14° */
+/* 角度限幅：远端松弛加速回正，近端收紧防过冲（"先大幅回正再微调"）
+ * 已按真实角度改到机械可接受范围，避免标定修正后摆杆撞限位。 */
+#define BALL_CONTROL_MAX_MDEG    (5000)   /* 常规限幅 ±5°（真实角度） */
+#define BALL_RETURN_MAX_MDEG     (7000)   /* 远端限幅 ±7°（真实角度） */
 #define BALL_RETURN_DIST_01MM    (400)    /* 远端判定：|x| > 40mm */
 
 /* 预测与死区 */
