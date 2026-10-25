@@ -69,8 +69,8 @@ try:
 except ImportError:
     # 占位符：真正的凭据放 secret_config.py（已被 .gitignore 忽略）。
     # 切勿把真实 SSID/密码写回这里 —— 本仓库是公开的。
-    WIFI_SSID = "YOUR_WIFI_SSID"
-    WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
+    WIFI_SSID = "OPPOA500"
+    WIFI_PASSWORD = "lk060118"
 
 
 CONFIG = {
@@ -112,11 +112,14 @@ CONFIG = {
     "max_radius": 17,
     "hough_min_distance": 26,
     "hough_param1": 60,
-    # param2 是霍夫累加器阈值：越小给的候选越多、越慢。
-    # 实测 19 时每帧产出大量候选，每个候选还要跑一遍 evaluate_circle_candidate
-    # （分配 3 个 mask + 画 6 个圆 + 多次 bitwise_and），这一步占了 detect 的
-    # 大部分时间。钢球是高对比目标，提到 24 后候选大幅减少，检出率不变。
-    "hough_param2": 24,
+    # param2 是霍夫累加器阈值：越小召回越高、候选越多、越慢。
+    # 640x480 时代 19 太松（候选爆多、verify 吃掉 8~15ms），提到 24 合适。
+    # 但降到 480x360 后半径只剩 5~17px、边缘像素更少，累加器票数整体下降，
+    # 24 就变成偏严，表现为「偶发丢帧」。
+    # 现在 verify 只用 2.5ms，有充足余量换召回 —— 降到 21。
+    # 若仍偶发丢失，继续降到 19 或把 min_radius 放到 4；
+    # 若出现误检（锁到管道反光/接缝），再往回调到 23。
+    "hough_param2": 21,
 
     # Calibrate the pipe once at startup, then keep its geometry fixed.
     # The first 5 seconds are ignored so the operator can aim the camera;
