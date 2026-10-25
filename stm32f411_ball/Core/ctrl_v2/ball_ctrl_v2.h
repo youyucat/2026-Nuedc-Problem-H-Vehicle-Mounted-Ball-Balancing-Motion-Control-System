@@ -52,7 +52,11 @@ typedef struct {
     /* ---- 静摩擦管理 ---- */
     int32_t stick_v_thresh_mms;    /* |v| 低于此值视为「可能顶住」 */
     int32_t stick_hold_ms;         /* 准静止持续多久后发脉冲 */
-    int32_t stick_pulse_mdeg;      /* 破静摩擦的最小可信角度（实测） */
+    int32_t stick_pulse_mdeg;      /* 破静摩擦的**起始**可信角度（实测） */
+    /* 自适应递增：同一个位置连续几次都推不动，说明这次遇到的静摩擦比
+     * 预估大，下一次把脉冲加大这么多。球一动就清零回到起始值。
+     * 实机上静摩擦随位置/清洁度变化，固定脉冲要么推不动、要么一脚踢飞。 */
+    int32_t stick_pulse_step_mdeg;
     int32_t stick_ramp_ms;         /* 脉冲爬升时间 */
     int32_t stick_hold_plateau_ms; /* 脉冲保持时间 */
     int32_t stick_relax_ms;        /* 卸力时间 */
@@ -97,6 +101,7 @@ typedef struct {
     uint32_t pulse_ms;          /* 脉冲已运行时长 */
     int32_t  pulse_dir;         /* +1 / -1 / 0 */
     int32_t  pulse_peak_mdeg;
+    uint16_t stick_tries;       /* 连续没推动的次数，用于脉冲自适应递增 */
 
     /* 输出 */
     int32_t  angle_req_mdeg;    /* 反馈+脉冲+偏置 求和后（未限速）*/

@@ -73,8 +73,12 @@ int main(int argc, char **argv)
     double angle_act = 0.0;
     const double ACT_SLEW_DEG_S = 36.0;
 
-    /* 静摩擦突破阈值（mm/s²），可由命令行覆盖做敏感性分析 */
-    double g_a_break = 8.0;
+    /* 静摩擦突破阈值（mm/s²）。
+     * 第一版按 T1 数据推得 8，但台架实测稳态输出 ±0.8°（≈144 mm/s²）
+     * 球仍不动 —— T1 那次「1° 让球动 2.6mm」反算只有 0.83 mm/s²，
+     * 是标定漂移而非滚动。按实机表现重新取 100（≈0.56°），
+     * 并用命令行参数扫 50~200 检查鲁棒性。 */
+    double g_a_break = 100.0;
 
     /* 指标 */
     double max_overshoot_mm = 0.0;

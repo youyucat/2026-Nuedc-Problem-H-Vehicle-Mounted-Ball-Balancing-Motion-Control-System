@@ -67,23 +67,20 @@ void ball_v2_default_cfg(ball_v2_cfg_t *cfg)
     cfg->kp_mdeg_per_mm   = 30;
     cfg->kd_mdeg_per_mm_s = 20;
 
-    /* 静摩擦管理（2026-10-25 重大修正）
+    /* 静摩擦管理（2026-10-25 实机数据二次修正）
      *
-     * 早期结论「需要 5~7.5° 脱困脉冲」是在角度虚高 15 倍时得出的：
-     * 命令 5° 实际只倾斜 0.33°，当然推不动球，于是不断加大脉冲。
-     * 标定后重算：命令 1°（真实 0.067°）就能让球从静止滚动，
-     * 说明真实静摩擦阈值 < 12 mm/s²，远小于原来假设的 400。
+     * 第一版按 T1 数据推得阈值 <12 mm/s²，取 pulse=0.2°。
+     * 但台架实测：稳态时输出 ±0.8°（≈144 mm/s²）球仍纹丝不动，
+     * 说明真实静摩擦远大于 12 —— T1 那次「1° 命令让球动 2.6mm」
+     * 反算加速度只有 0.83 mm/s²，那是标定漂移，不是滚动。
      *
-     * 仿真（a_break=8）验证：
-     *   pulse=0     , 收敛 865ms, 终值 1.8mm   ← 不加脉冲也能收敛
-     *   pulse=100   , 收敛 847ms, 终值 0.2mm   ← 最优
-     *   pulse=300   , 收敛 814ms, 终值 0.8mm
-     *   pulse=800   , 过冲 9.1mm，不收敛       ← 一脚踢飞
-     *   pulse=1500  , 过冲 14.7mm              ← 更糟
-     * 取 200（0.2°）作为起点：够越过阈值，又不会把球踢起来。 */
+     * 静摩擦还会随位置/清洁度变化，固定脉冲要么推不动、要么踢飞，
+     * 因此改成自适应：从 0.5° 起，连续推不动就 +0.4°，球一动立刻归零。
+     * 0.5/0.9/1.3/1.7/2.1° 依次覆盖 0.56~2.3° 的阈值范围。 */
     cfg->stick_v_thresh_mms   = 8;
     cfg->stick_hold_ms        = 150;
-    cfg->stick_pulse_mdeg     = 200;
+    cfg->stick_pulse_mdeg     = 600;    /* 起始 0.6° */
+    cfg->stick_pulse_step_mdeg = 500;   /* 每次没推动 +0.5° */
     cfg->stick_ramp_ms        = 80;
     cfg->stick_hold_plateau_ms = 120;
     cfg->stick_relax_ms       = 100;
@@ -247,6 +244,7 @@ int32_t ball_v2_step(ball_v2_t *c, uint32_t now_ms)
             c->pulse_dir  = 0;
             c->pulse_ms   = 0;
             c->pulse_mdeg = 0;
+            c->stick_tries = 0;     /* 推起来了，下次回到起始脉冲 */
         }
     }
 
@@ -261,12 +259,20 @@ int32_t ball_v2_step(ball_v2_t *c, uint32_t now_ms)
             (abs_i32(err_pred) > k->deadband_01mm)) {
             dir = sign_i32(err_pred);
             if (dir != 0) {
+                /* 脉冲起点随「连续推不动次数」递增：
+                 * 静摩擦随位置/清洁度变化，固定值要么推不动、要么踢飞。
+                 * 每次没推动就加大一档，球一动立刻回到起始值。 */
+                int32_t base = k->stick_pulse_mdeg +
+                               (int32_t)c->stick_tries * k->stick_pulse_step_mdeg;
+
+                if (c->stick_tries < 20U) c->stick_tries++;
+
                 c->pulse_dir  = dir;
                 c->pulse_ms   = 0;
                 /* 行程越远，脉冲略大一些，但不超过上限的 60% */
                 c->pulse_peak_mdeg = clamp_i32(
-                    k->stick_pulse_mdeg + abs_i32(err_pred) / 4,
-                    k->stick_pulse_mdeg,
+                    base + abs_i32(err_pred) / 4,
+                    base,
                     (k->angle_max_mdeg * 6) / 10);
                 c->quiet_ms = 0;
             }
