@@ -55,6 +55,7 @@ static uint16_t s_left_motor_trim_permille =
 static uint16_t s_right_motor_trim_permille =
     TEMPLATE_DEFAULT_RIGHT_MOTOR_TRIM_PERMILLE;
 static uint32_t s_last_speed_sequence;
+static bool s_auto_start = true;
 
 static void clear_motion(void)
 {
@@ -430,8 +431,10 @@ void line_task_step(uint32_t now_ms)
 
     if (s_snapshot.state == LINE_TASK_STATE_IDLE) {
         /* 上电等待窗口结束后自动起步；不在线上时 running_step 会保持
-         * 零目标（电机不转），直到看到线才真正走。 */
-        if ((uint32_t)(now_ms - s_boot_ms) >= TEMPLATE_STARTUP_HOLD_MS) {
+         * 零目标（电机不转），直到看到线才真正走。
+         * s_auto_start 由串口 stop 命令关闭 —— 手动停不该被自动起步覆盖。 */
+        if (s_auto_start &&
+            ((uint32_t)(now_ms - s_boot_ms) >= TEMPLATE_STARTUP_HOLD_MS)) {
             (void)line_task_start();
         }
         return;
@@ -444,6 +447,16 @@ void line_task_step(uint32_t now_ms)
 void line_task_get_snapshot(line_task_snapshot_t *snapshot)
 {
     if (snapshot != NULL) *snapshot = s_snapshot;
+}
+
+void line_task_set_auto_start(bool enabled)
+{
+    s_auto_start = enabled;
+}
+
+void line_task_get_frame(line_frame_t *frame)
+{
+    if (frame != NULL) *frame = s_line_frame;
 }
 
 bool line_task_start(void)

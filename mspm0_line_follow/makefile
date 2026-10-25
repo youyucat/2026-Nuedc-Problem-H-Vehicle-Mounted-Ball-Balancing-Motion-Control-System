@@ -30,6 +30,7 @@ SOURCES := \
     app/line_task.c \
     bsp/board.c \
     bsp/hal_system_mspm0.c \
+    bsp/uart_debug.c \
     control/line_controller.c \
     control/line_estimator.c \
     drivers/motor_tb6612.c \

@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "services/line_processing.h"   /* line_frame_t（get_frame 用） */
+
 /*
  * 循迹任务（双芯架构中的「循迹芯片」主任务）。
  *
@@ -53,6 +55,15 @@ void line_task_get_snapshot(line_task_snapshot_t *snapshot);
 bool line_task_start(void);
 void line_task_stop(void);
 void line_task_reset_fault(void);
+
+/* 自动起步开关（默认开，保持"上电自检后自动循迹"的行为）。
+ * 串口调试的 stop 命令会关掉它 —— 否则刚停下 TEMPLATE_STARTUP_HOLD_MS
+ * 就又被自动起步拉起来，手动停不下来。start 命令会重新打开。 */
+void line_task_set_auto_start(bool enabled);
+
+/* 取最近一帧灰度处理结果（原始值/归一化/阈值/判黑位图），
+ * 供串口调试的 raw 视图与校准采样使用。 */
+void line_task_get_frame(line_frame_t *frame);
 
 /* 运行时调参（不做 Flash 持久化）：base 为基础速度 mm/s，
  * kp/kd 以千分之一为单位。越界返回 false 且不生效。 */

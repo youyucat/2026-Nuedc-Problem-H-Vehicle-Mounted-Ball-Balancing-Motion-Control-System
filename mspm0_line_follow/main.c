@@ -19,6 +19,7 @@
 #include "hal/hal.h"
 
 #include "app/line_task.h"
+#include "bsp/uart_debug.h"
 
 int main(void)
 {
@@ -32,7 +33,11 @@ int main(void)
     /* 板级初始化 + 灰度预热 + 电机待机（电机零输出，不会自己冲出去） */
     line_task_init();
 
+    /* 调试串口（UART0，PA10/PA11，115200）：启停 / 灰度校准 / 调参 / 观测 */
+    uart_debug_init();
+
     while (1) {
         line_task_step(hal_time_millis());
+        uart_debug_poll();     /* 收命令 + 周期打印；发送走中断不阻塞控制拍 */
     }
 }

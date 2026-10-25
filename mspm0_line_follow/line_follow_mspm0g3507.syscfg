@@ -3,7 +3,8 @@
  *
  * 只声明本工程实际用到的外设：SYSCTL 时钟树 + SysTick + ADC0（灰度 MUX 输出）。
  *
- * 没有 UART / I2C / DMA / 定时器：
+ * 没有 I2C / DMA / 定时器实例；UART0 也不在这里 —— 它和 TIMA1 一样在
+ * bsp/ 里手写初始化（bsp/uart_debug.c，PA10/PA11 调试串口）：
  *   - TB6612 的 PWM 用 TIMA1，在 bsp/board.c 里用手写 DriverLib 初始化
  *     （不是 SysConfig 实例，所以这里没有 Timer 模块）；
  *   - 灰度 MUX 地址线 AD0-2 / EN / ERR、TB6612 方向脚、左右轮编码器脚
