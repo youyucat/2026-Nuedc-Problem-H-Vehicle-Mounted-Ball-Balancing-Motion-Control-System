@@ -83,6 +83,21 @@ void ball_v2_default_cfg(ball_v2_cfg_t *cfg)
      * 静摩擦还会随位置/清洁度变化，固定脉冲要么推不动、要么踢飞，
      * 因此改成自适应：从 0.5° 起，连续推不动就 +0.4°，球一动立刻归零。
      * 0.5/0.9/1.3/1.7/2.1° 依次覆盖 0.56~2.3° 的阈值范围。 */
+    /* 静止判定（2026-10-25 实机"停在一侧圈边不进圈"修正）
+     *
+     * 实机现象：目标在右→球停在圈左边，目标在左→停在圈右边——
+     * 总是欠冲一段（约 10~15mm）后卡死。机理：
+     *   1) kd 阻尼 + 延迟补偿让球在目标前减速，滑行被摩擦吃掉，
+     *      停在欠 10~15mm 处（P 项 kp*14mm=0.42° < 静摩擦 1.0°，推不动）；
+     *   2) 脱困脉冲需要 |v_est|<8 且连续安静 150ms，但单帧差测速的
+     *      量化噪声 σ≈7mm/s（0.64mm/34ms ≈ 18.6 原始、EMA1/4 后仍 7+），
+     *      实机帧间隔还在 24~37ms 抖动（PERF 实测），噪声更大 ——
+     *      阈值 8 与噪声同量级，连续 4~5 帧全部 |v|<8 的概率只有百分之几，
+     *      quiet_ms 凑不满 150ms → 脉冲几乎永远发不出来 → 球卡死。
+     * 仿真（理想 34ms 周期、噪声 0.15mm）判定成功率高，所以没复现；
+     * 而直接放宽阈值到 25 会在 x0=60/90 引发来回微踢（大动作拍数 3 倍）。
+     * 修正：测速改跨帧差分（见 ball_v2_feed），噪声减半后阈值 8 即为 2.3σ，
+     * 判定可靠，此两参数保持不变。 */
     cfg->stick_v_thresh_mms   = 8;
     cfg->stick_hold_ms        = 150;
 
@@ -161,12 +176,19 @@ void ball_v2_reset(ball_v2_t *c)
 
 void ball_v2_feed(ball_v2_t *c, int32_t x_01mm, uint32_t now_ms)
 {
-    if (c->have_x) {
-        uint32_t dt = now_ms - c->last_x_ms;
+    /* 测速：跨帧差分（当前帧 vs 前一帧，窗长约 2 个帧周期）。
+     * 单帧差（34ms）的量化噪声 0.64mm/0.034s ≈ 18.6 mm/s，EMA1/4 后
+     * 仍有 σ≈7mm/s，与静止判定阈值 stick_v_thresh(8) 同量级 —— 实机上
+     * 「连续安静 150ms」几乎凑不齐，脱困脉冲发不出来，球卡在
+     * P 项(0.42°)推不动的位置。跨帧差（~68ms）噪声减半，EMA 后 σ≈3.5，
+     * 阈值 8 变成 2.3σ，判定可靠。代价是速度估计多滞后约一帧，
+     * 已计入 loop_delay_ms=50 的近似范围内。 */
+    if (c->have_prev) {
+        uint32_t dt = now_ms - c->prev_x_ms;
         /* 只在合理间隔内做帧差，避免首帧/重捕获踢出一个假速度 */
-        if ((dt >= 5U) && (dt <= 200U)) {
+        if ((dt >= 5U) && (dt <= 250U)) {
             /* dx 单位是 0.1mm：v[mm/s] = dx*0.1 / (dt/1000) = dx*100/dt */
-            int32_t dv = (int32_t)(((int64_t)(x_01mm - c->x_raw_01mm) * 100) / (int32_t)dt);
+            int32_t dv = (int32_t)(((int64_t)(x_01mm - c->x_prev_01mm) * 100) / (int32_t)dt);
             if (dv > 3000)  dv = 3000;
             if (dv < -3000) dv = -3000;
             c->v_est_mms += (dv - c->v_est_mms) / 4;      /* EMA 1/4 */
@@ -174,6 +196,11 @@ void ball_v2_feed(ball_v2_t *c, int32_t x_01mm, uint32_t now_ms)
             c->v_est_mms = 0;
         }
     }
+
+    /* 滚动保存前一帧 */
+    c->x_prev_01mm = c->x_raw_01mm;
+    c->prev_x_ms   = c->last_x_ms;
+    c->have_prev   = c->have_x;
 
     c->x_raw_01mm = x_01mm;
     c->last_x_ms  = now_ms;

@@ -84,6 +84,9 @@ typedef struct {
     /* 输入侧 */
     int32_t  x_raw_01mm;        /* 最近一次视觉位置 */
     uint32_t last_x_ms;         /* 该位置的时刻 */
+    int32_t  x_prev_01mm;       /* 前一帧视觉位置（跨帧差分测速用） */
+    uint32_t prev_x_ms;         /* 前一帧时刻 */
+    uint8_t  have_prev;         /* 前一帧有效 */
     uint32_t now_ms;
     uint8_t  have_x;
 
