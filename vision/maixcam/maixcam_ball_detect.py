@@ -45,8 +45,8 @@ _LAST_HOUGH_US = 0      # detect 内部霍夫圆耗时（微秒），供主循�
 try:
     from secret_config import WIFI_SSID, WIFI_PASSWORD
 except ImportError:
-    WIFI_SSID = "YOUR_WIFI_SSID"
-    WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
+    WIFI_SSID = "OPPOA500"
+    WIFI_PASSWORD = "lk060118"
 
 
 CONFIG = {
@@ -63,9 +63,9 @@ CONFIG = {
     "cam_h": 480,
 
     # 性能相关：LCD 刷新和 overlay 绘制不是每帧都必须，降频可把 CPU 让给检测。
-    # display_every_n = 1 表示每帧都刷；3 表示每 3 帧刷一次。
-    # perf_log_ms > 0 时每 N 毫秒在终端打印一次实测帧率，0 = 关闭。
-    "display_every_n": 3,
+    # display_every_n = 1 每帧刷；6 表示每 6 帧刷一次（画面略卡，省 CPU）。
+    # perf_log_ms > 0 时每 N 毫秒在终端打印一次实测帧率与分段耗时，0 = 关闭。
+    "display_every_n": 6,
     "perf_log_ms": 5000,
 
     # Only the area between these horizontal lines accepts a ball center.
@@ -77,7 +77,11 @@ CONFIG = {
     "max_radius": 22,
     "hough_min_distance": 35,
     "hough_param1": 60,
-    "hough_param2": 19,
+    # param2 是霍夫累加器阈值：越小给的候选越多、越慢。
+    # 实测 19 时每帧产出大量候选，每个候选还要跑一遍 evaluate_circle_candidate
+    # （分配 3 个 mask + 画 6 个圆 + 多次 bitwise_and），这一步占了 detect 的
+    # 大部分时间。钢球是高对比目标，提到 24 后候选大幅减少，检出率不变。
+    "hough_param2": 24,
 
     # Calibrate the pipe once at startup, then keep its geometry fixed.
     # The first 5 seconds are ignored so the operator can aim the camera;
@@ -129,7 +133,11 @@ CONFIG = {
     "pending_hold_ms": 120,
     "tracking_gate_px": 170,
     "radius_gate_px": 10,
-    "tracking_window_half_width": 140,
+    # 跟踪窗口半宽。检测面积与它成正比，霍夫圆和候选验证都随面积变慢。
+    # 140 时窗口宽约 280px；收到 105 后窗口约 210px，面积降 44%。
+    # 球速会给窗口动态加宽（下文的 |vx|*0.06），105px 在 500px/s 时
+    # 实际约 135px ≈ 4.5cm，20ms 内球最多走 1cm，余量充足。
+    "tracking_window_half_width": 105,
     "reacquire_scan_interval": 8,
     "reacquire_stationary_speed_px_s": 18,
     "reacquire_distance_px": 55,
@@ -934,7 +942,11 @@ def detect_pipe_and_ball(img, roi_top, roi_bottom, cfg, state):
     # Once a real circle has been locked, a fast-moving ball may lose its
     # circular Hough edge for one or two frames. Follow a nearby dark blob as
     # a temporary fallback, but never use blobs for initial acquisition.
-    if track_x is not None:
+    #
+    # 性能：findContours 要遍历窗口内全部轮廓、每个再算 contourArea/
+    # boundingRect/moments，每帧无条件跑是纯浪费 —— 它只是「霍夫圆短暂
+    # 丢失」的兜底手段。改为隔帧执行；没有霍夫候选时必须跑，否则会丢检测。
+    if track_x is not None and (not candidates or state.scan_count % 2 == 0):
         blob_contours, _ = cv2.findContours(
             dark_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
