@@ -79,6 +79,9 @@ static const uint32_t T5_SPEEDS[] = { 200U, 800U };
 static const int32_t  T5_ANGLE   = 15000;
 #define T5_HOLD_MS    1500U
 
+/* 自检结束时把摆杆保持在这个角度，供尺子测量末端抬升量 */
+#define T4_HOLD_ANGLE   25000
+
 static st_state_t s_state;
 static uint32_t   s_ts;          /* 进入当前状态的时刻 */
 static int32_t    s_ang;         /* 当前测试角度 mdeg */
@@ -347,9 +350,17 @@ void selftest_poll(void)
             s_t4_idx++;
             if (s_t4_idx >= (uint8_t)T5_SPEED_N) {
                 stepper_set_run_speed(STEPPER_SERVO_SPEED);   /* 恢复稳球速度 */
+                /* 停在一个已知角度不动，方便用尺子量摆杆末端抬升高度。
+                 * 这是标定「命令角 -> 真实倾角」最直接的办法。 */
+                st_set_angle(T4_HOLD_ANGLE);
                 st_printf("\r\n# DONE —— 把上面输出复制保存为 CSV\r\n");
-                st_printf("# 进入手动验证：手抬摆杆一端约 1cm，\r\n");
-                st_printf("#   M,<球位置>,<视觉有效>,<帧>,<步进位置>,<忙>\r\n");
+                st_printf("# 摆杆现在保持在 %ld mdeg（%ld.%03ld 度），不要动它\r\n",
+                          (long)T4_HOLD_ANGLE,
+                          (long)(T4_HOLD_ANGLE / 1000),
+                          (long)(T4_HOLD_ANGLE % 1000));
+                st_printf("# 【请用尺子量】摆杆活动端比水平位置抬高了多少 mm\r\n");
+                st_printf("# 参考：手抬约 10mm 时球能跑满导轨\r\n");
+                st_printf("# M,<球位置>,<视觉>,<帧>,<步进位置>,<忙>\r\n");
                 s_print_ts = now - 200U;
                 st_enter(S_MONITOR);
             } else {
