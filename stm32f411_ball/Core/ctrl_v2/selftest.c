@@ -24,6 +24,7 @@ extern uint32_t ball_ctrl_frame_count(void);
 /* 步进内部状态：用来区分「电机没动」和「电机动了但机械没带动」 */
 extern int32_t  stepper_position(void);
 extern uint8_t  stepper_is_busy(void);
+extern void     stepper_set_run_speed(uint32_t sps);
 
 /* 调试日志走 PC6/PC7（USART6）。PA9/PA10 是与 MaixCam+主控的协议链路，
  * 自检输出绝不能发到那里，否则会污染 12 字节二进制帧。 */
@@ -54,6 +55,9 @@ typedef enum {
     S_T3_RUN,
     S_T4_SET,
     S_T4_HOLD,
+    S_T5_SET,
+    S_T5_HOLD,
+    S_T5_BACK,
     S_DONE,
     S_MONITOR          /* 自检结束后持续打印位置，供人工抬杆验证视觉 */
 } st_state_t;
@@ -66,6 +70,14 @@ typedef enum {
 static const int32_t T4_ANGLES[] = { 5000, 15000, 25000, 0 };
 #define T4_ANGLE_N   (sizeof(T4_ANGLES) / sizeof(T4_ANGLES[0]))
 #define T4_HOLD_MS   1200U
+
+/* T5 速度对比：同一角度用两个速度跑，区分「丢步」和「机械减速」
+ *   - 降速后球反应明显变大 -> 丢步（负载太重/加速度太大）
+ *   - 两个速度反应一样     -> 机械减速比，与速度无关 */
+static const uint32_t T5_SPEEDS[] = { 200U, 800U };
+#define T5_SPEED_N    (sizeof(T5_SPEEDS) / sizeof(T5_SPEEDS[0]))
+static const int32_t  T5_ANGLE   = 15000;
+#define T5_HOLD_MS    1500U
 
 static st_state_t s_state;
 static uint32_t   s_ts;          /* 进入当前状态的时刻 */
@@ -299,13 +311,49 @@ void selftest_poll(void)
             s_t4_idx++;
             if (s_t4_idx >= (uint8_t)T4_ANGLE_N) {
                 st_set_angle(0);
+                s_t4_idx = 0;
+                st_enter(S_T5_SET);
+            } else {
+                st_enter(S_T4_SET);
+            }
+        }
+        break;
+
+    /* ---------- 阶段 5：速度对比，区分丢步与机械减速 ---------- */
+    case S_T5_SET:
+        stepper_set_run_speed(T5_SPEEDS[s_t4_idx]);
+        s_x_mark  = st_x();
+        s_t4_pos0 = stepper_position();
+        st_printf("# T5 speed=%lu pps angle=%ld\r\n",
+                  (unsigned long)T5_SPEEDS[s_t4_idx], (long)T5_ANGLE);
+        st_set_angle(T5_ANGLE);
+        st_enter(S_T5_HOLD);
+        break;
+
+    case S_T5_HOLD:
+        if ((now - s_ts) >= T5_HOLD_MS) {
+            /* T5,<速度pps>,<球位移0.1mm>,<步进位移步> */
+            st_printf("T5,%lu,%ld,%ld\r\n",
+                      (unsigned long)T5_SPEEDS[s_t4_idx],
+                      (long)(st_x() - s_x_mark),
+                      (long)(stepper_position() - s_t4_pos0));
+            st_set_angle(0);
+            st_enter(S_T5_BACK);
+        }
+        break;
+
+    case S_T5_BACK:
+        if ((now - s_ts) >= 1000U) {
+            s_t4_idx++;
+            if (s_t4_idx >= (uint8_t)T5_SPEED_N) {
+                stepper_set_run_speed(STEPPER_SERVO_SPEED);   /* 恢复稳球速度 */
                 st_printf("\r\n# DONE —— 把上面输出复制保存为 CSV\r\n");
                 st_printf("# 进入手动验证：手抬摆杆一端约 1cm，\r\n");
                 st_printf("#   M,<球位置>,<视觉有效>,<帧>,<步进位置>,<忙>\r\n");
                 s_print_ts = now - 200U;
                 st_enter(S_MONITOR);
             } else {
-                st_enter(S_T4_SET);
+                st_enter(S_T5_SET);
             }
         }
         break;
