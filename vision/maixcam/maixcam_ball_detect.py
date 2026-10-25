@@ -67,8 +67,10 @@ def _mask_buf(slot, shape):
 try:
     from secret_config import WIFI_SSID, WIFI_PASSWORD
 except ImportError:
-    WIFI_SSID = "OPPOA500"
-    WIFI_PASSWORD = "lk060118"
+    # 占位符：真正的凭据放 secret_config.py（已被 .gitignore 忽略）。
+    # 切勿把真实 SSID/密码写回这里 —— 本仓库是公开的。
+    WIFI_SSID = "YOUR_WIFI_SSID"
+    WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
 
 
 CONFIG = {
@@ -81,8 +83,18 @@ CONFIG = {
     "uart_device": "/dev/ttyS1",
     "uart_baud": 115200,
     "uart_period_ms": 20,
-    "cam_w": 640,
-    "cam_h": 480,
+    # 分辨率：从 640x480 降到 480x360（0.75 倍）。
+    #
+    # 依据实测分段：detect 36ms = pre 18 + hough 11.4 + verify 3.5 + 其它 3。
+    # pre（image2cv + cvtColor + 滤波 + 阈值 + 形态学）和 hough 都吃像素数，
+    # 面积降 0.56 倍 → detect 约 21ms，总帧时间 48 → 33ms，约 30fps。
+    #
+    # 代价：位置量化 0.48 → 0.64 mm/px（指标是 10mm，仍余量 15 倍）。
+    # ROI 高度 48 → 36 行，球最大直径 44 → 32 px，余量都是 4 px，未变紧。
+    # 下面的半径/距离类参数已按 0.75 同步缩放，与分辨率保持等效。
+    # 若要回退，把这里改回 640/480 并把下面标了 (x0.75) 的参数改回去。
+    "cam_w": 480,
+    "cam_h": 360,
 
     # 性能相关：LCD 刷新和 overlay 绘制不是每帧都必须，降频可把 CPU 让给检测。
     # display_every_n = 1 每帧刷；6 表示每 6 帧刷一次（画面略卡，省 CPU）。
@@ -95,9 +107,10 @@ CONFIG = {
     "roi_bottom_ratio": 0.50,
 
     # Conservative circle detector tuning for the steel ball.
-    "min_radius": 7,
-    "max_radius": 22,
-    "hough_min_distance": 35,
+    # 半径与距离类参数已按 0.75 缩放（对应 480x360）。原值：5/17→7/22 等。
+    "min_radius": 5,
+    "max_radius": 17,
+    "hough_min_distance": 26,
     "hough_param1": 60,
     # param2 是霍夫累加器阈值：越小给的候选越多、越慢。
     # 实测 19 时每帧产出大量候选，每个候选还要跑一遍 evaluate_circle_candidate
@@ -116,10 +129,10 @@ CONFIG = {
     # Independent left/right endpoint blind lines (pixels from each pipe end).
     # The mobile end (the side that tilts up/down) must be tracked live so the
     # blind line follows it; see mobile_end_* below.
-    "endpoint_guard_left_px": 19,
-    "endpoint_guard_right_px": 17,
-    "endpoint_penalty_zone_left_px": 28,
-    "endpoint_penalty_zone_right_px": 28,
+    "endpoint_guard_left_px": 14,
+    "endpoint_guard_right_px": 13,
+    "endpoint_penalty_zone_left_px": 21,
+    "endpoint_penalty_zone_right_px": 21,
     "endpoint_score_penalty_left": 0.28,
     "endpoint_score_penalty_right": 0.28,
 
@@ -151,23 +164,23 @@ CONFIG = {
 
     # Require consecutive frames before acquisition and reject large jumps.
     "acquire_confirm_frames": 2,
-    "acquire_tolerance_px": 55,
+    "acquire_tolerance_px": 41,
     "pending_hold_ms": 120,
-    "tracking_gate_px": 170,
-    "radius_gate_px": 10,
+    "tracking_gate_px": 127,
+    "radius_gate_px": 8,
     # 跟踪窗口半宽。检测面积与它成正比，霍夫圆和候选验证都随面积变慢。
     # 140 时窗口宽约 280px；收到 105 后窗口约 210px，面积降 44%。
     # 球速会给窗口动态加宽（下文的 |vx|*0.06），105px 在 500px/s 时
     # 实际约 135px ≈ 4.5cm，20ms 内球最多走 1cm，余量充足。
-    "tracking_window_half_width": 105,
+    "tracking_window_half_width": 79,
     "reacquire_scan_interval": 8,
-    "reacquire_stationary_speed_px_s": 18,
-    "reacquire_distance_px": 55,
+    "reacquire_stationary_speed_px_s": 14,
+    "reacquire_distance_px": 41,
     "reacquire_min_score": 0.46,
     "reacquire_min_motion_ratio": 0.025,
     "reacquire_confirm_frames": 3,
     "reacquire_min_motion_px": 2,
-    "reacquire_max_step_px": 70,
+    "reacquire_max_step_px": 53,
     "reacquire_hold_ms": 450,
 
     # Stationary-lock suspect detection: a locked target that sits still away
@@ -176,7 +189,7 @@ CONFIG = {
     # stillness outside suspect_center_deadzone_px, force full-pipe scans
     # every frame and relax the challenger motion gate so a real (possibly
     # still) ball can steal the lock.
-    "suspect_center_deadzone_px": 40,
+    "suspect_center_deadzone_px": 30,
     "suspect_stationary_frames": 25,
     "suspect_score_penalty": 0.25,
     # Suspect recovery: if the suspect state stays active this many frames
