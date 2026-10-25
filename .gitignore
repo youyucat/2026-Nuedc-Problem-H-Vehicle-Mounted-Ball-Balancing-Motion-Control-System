@@ -87,3 +87,8 @@ secret_config.py
 *.pdf
 *.zip
 *.7z
+
+# ---------------- PC 仿真产物 ----------------
+sim_ctrl
+sim_ctrl.exe
+stm32f411_ball/Core/ctrl_v2/sim/*.txt
