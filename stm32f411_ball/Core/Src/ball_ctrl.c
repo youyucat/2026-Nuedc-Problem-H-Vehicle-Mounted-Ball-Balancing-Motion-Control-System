@@ -44,6 +44,7 @@
 
 #include "ball_ctrl.h"
 #include "ball_lqr.h"
+#include "ball_ctrl_v2.h"      /* ctrl_v2：延迟补偿 + 静摩擦管理（BALL_USE_CTRL_V2） */
 #include "stepper.h"
 #include "main.h"
 #include <stdlib.h>
@@ -133,6 +134,14 @@ static uint8_t  s_lost_phase   = 0;          /* 0=可用 1=保持期 2=回平 */
 /* --- 台架手动模式（M 帧）：绕过控制律直接指定摆角，用于标定方向 --- */
 static uint8_t  s_manual     = 0;
 static int32_t  s_manual_mdeg = 0;
+
+#if BALL_USE_CTRL_V2
+/* --- ctrl_v2 控制器（Core/ctrl_v2/） ---
+ * 与旧 PD 的区别：状态前推补偿延迟、静摩擦用最小可信脉冲而非猛踢、
+ * 全部状态在一个结构体里（reset 一次 memset）。参数按真实摆杆角度整定。 */
+static ball_v2_t     s_v2;
+static ball_v2_cfg_t s_v2cfg;
+#endif
 
 /* ===================== UART 接收（环形缓冲） ===================== */
 
@@ -500,7 +509,33 @@ static int32_t control_update(uint32_t dt_ms)
         s_v_est = estimate_ball_velocity(s_ball_01mm, s_frame_cnt, dt_ms);
     }
 
-#if BALL_USE_LQR
+#if BALL_USE_CTRL_V2
+    /* --- ctrl_v2：延迟补偿 + 静摩擦管理（Core/ctrl_v2/） ---
+     *
+     * 与旧 PD 的实质差异（不是换增益，是换结构）：
+     *   1. 延迟补偿：把状态前推到「本拍输出真正生效」的时刻
+     *      x + v·Td + ½a·Td²，用未来的状态做反馈，抵消回路延迟
+     *   2. 静摩擦管理：准静止判定 → 只发最小可信脉冲 → 球一动立即卸力
+     *      （旧实现是 5~7.5° 猛踢，每次把球踢过头再反向踢，形成极限环）
+     *   3. 输出自带限幅与斜率整形，外层只做角度上限的最终钳位
+     * 参数按真实摆杆角度整定（15:1 标定后，mdeg 数值 = 真实角度）。 */
+    err = s_x_ema_01mm - s_xref_01mm;
+    lim = active_angle_limit(err);
+
+    {
+        uint32_t t = HAL_GetTick();
+
+        ball_v2_feed(&s_v2, s_ball_01mm, t);    /* 喂本帧位置（内部做EMA+测速） */
+        pd    = ball_v2_step(&s_v2, t);         /* 取本拍输出角度（mdeg） */
+    }
+    pd    = clamp_i32(pd, -lim, lim);
+    stick = 0;                                   /* ctrl_v2 自带静摩擦管理 */
+    combined = pd + stick;
+
+    /* 遥测：让旧接口仍能反映出新控制器的内部量 */
+    s_fb_mdeg = ball_v2_fb(&s_v2);
+    s_sat     = ball_v2_sat(&s_v2);
+#elif BALL_USE_LQR
     /* --- LQR 状态反馈 + 积分增广（Core/lqr/，推导见 README_LQR.md） --- */
     err = s_x_ema_01mm - s_xref_01mm;
     if (abs_i32(err) <= BALL_CENTER_DEADBAND_01MM) err = 0;
@@ -560,6 +595,10 @@ static void reset_control_state(void)
     s_stick_ms = 0U;
     s_stick_boost = 0;
     s_stick_memory = 0;
+#if BALL_USE_CTRL_V2
+    ball_v2_reset(&s_v2);                   /* ctrl_v2：一次 memset，不留漏字段隐患 */
+    ball_v2_set_target(&s_v2, s_xref_01mm);
+#endif
 #if BALL_USE_LQR
     ball_lqr_reset();        /* LQR 模式：积分状态一并清零 */
 #endif
@@ -607,6 +646,23 @@ void ball_ctrl_init(void)
     s_crc_err   = 0U;
 
     reset_control_state();
+
+#if BALL_USE_CTRL_V2
+    ball_v2_default_cfg(&s_v2cfg);
+    /* 角度上限跟工程限幅保持一致，避免 ctrl_v2 内部放行到机械极限 */
+    s_v2cfg.angle_max_mdeg = BALL_CONTROL_MAX_MDEG;
+
+    /* 静摩擦脉冲：仿真里给 2.5° 是在「角度虚高 15 倍」的假设下试出来的。
+     * 标定后 2.5° 是真的 2.5°，会把球一脚踢飞。
+     * 台架旁证：旧固件命令 1°（真实 0.067°）就能让球从静止滚动，
+     * 说明真实静摩擦阈值远小于 0.1°。先取 0.3°（约阈值数倍）作为起点，
+     * 上机若球顶住不动再加，若一踢就飞再减。 */
+    s_v2cfg.stick_pulse_mdeg = 300;
+
+    ball_v2_init(&s_v2, &s_v2cfg);
+    ball_v2_set_target(&s_v2, s_xref_01mm);
+#endif
+
     ball_ctrl_uart_start_rx();
 }
 
@@ -727,6 +783,10 @@ void ball_ctrl_feed_xref(int32_t x01mm)
     if (x01mm >  (int32_t)lim) x01mm =  (int32_t)lim;
     if (x01mm < -(int32_t)lim) x01mm = -(int32_t)lim;
     s_xref_01mm = x01mm;
+
+#if BALL_USE_CTRL_V2
+    ball_v2_set_target(&s_v2, x01mm);   /* 同步给 ctrl_v2（R 帧设定目标） */
+#endif
 }
 
 void ball_ctrl_feed_manual(int32_t angle_mdeg)
@@ -822,6 +882,16 @@ void ball_ctrl_tick_10ms(void)
                                BALL_INERTIA_MAX_MDEG);
 
         lim = active_angle_limit(s_x_ema_01mm - s_xref_01mm);
+#if BALL_USE_CTRL_V2
+        /* ctrl_v2 已经给出完整输出（含延迟补偿需要的反向刹车），
+         * 不再套「只朝目标方向推」的约束，否则刹车会被削掉、前推失效。
+         * 微调死区也由 ctrl_v2 内部负责。 */
+        requested = s_fb_mdeg + s_ff_mdeg;
+        requested = clamp_i32(requested, -lim, lim);
+        if ((now - s_start_ms) < BALL_ENABLE_SETTLE_MS) {
+            requested = 0;                       /* 滤波建立前不出力 */
+        }
+#else
         requested = constrain_to_ball_side(s_fb_mdeg,
                                            s_x_ema_01mm - s_xref_01mm,
                                            s_v_est) + s_ff_mdeg;
@@ -833,6 +903,7 @@ void ball_ctrl_tick_10ms(void)
         } else if (abs_i32(requested) < BALL_TARGET_DEADBAND) {
             requested = 0;                       /* 微调死区：稳定球不追针 */
         }
+#endif
         s_req_mdeg = requested;
 
         /* 斜率选择：减速/换向用刹车斜率 120°/s，加速推球用 60°/s */

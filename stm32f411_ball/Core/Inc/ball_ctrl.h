@@ -53,11 +53,19 @@ extern "C" {
 #define ROD_HALF_LEN_MM     (120.0f)
 
 /* --- 控制律选择 ----------------------------------------------------------
- * 0 = 滑模 PD + 回零偏学习（默认，参考设计移植）
- * 1 = LQR 状态反馈 + 积分增广（Core/lqr/，原理见 Core/lqr/README_LQR.md）
- * 两者共用静摩擦脱困脉冲/丢球管理/前馈/输出整形；LQR 模式的积分项
- * 替代回零偏学习（偏置学习自动停用）。编译期选择，改后需全量重编译。
- * （#ifndef 包裹：可用命令行 -DBALL_USE_LQR=1 临时覆盖，方便双固件编译） */
+ * BALL_USE_CTRL_V2 = 1 时优先使用 ctrl_v2（Core/ctrl_v2/），忽略下面两个：
+ *   ctrl_v2 自带延迟补偿（状态前推）、静摩擦管理、限幅，参数按真实角度整定。
+ *   2026-10-25 角度标定修正（15:1 减速）后，旧 PD/LQR 的全部 mdeg 参数失效，
+ *   因此默认切到 ctrl_v2。
+ *
+ * 以下两个开关仅在 BALL_USE_CTRL_V2 = 0 时生效：
+ *   0 = 滑模 PD + 回零偏学习（参考设计移植，参数已失效，仅供对照）
+ *   1 = LQR 状态反馈 + 积分增广（Core/lqr/，参数同样已失效）
+ * 编译期选择，改后需全量重编译。 */
+#ifndef BALL_USE_CTRL_V2
+#define BALL_USE_CTRL_V2   (1)
+#endif
+
 #ifndef BALL_USE_LQR
 #define BALL_USE_LQR       (0)
 #endif
