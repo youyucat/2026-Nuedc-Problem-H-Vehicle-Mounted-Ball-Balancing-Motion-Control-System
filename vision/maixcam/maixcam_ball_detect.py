@@ -87,6 +87,17 @@ CONFIG = {
     "mobile_end_smoothing": 0.15,
     "mobile_end_refresh_interval": 5,
 
+    # 活动端跟踪开关。
+    # 这个功能会定期重跑 OTSU + 形态学 + findContours 去找管道轮廓，只为
+    # 让端点盲区线跟着摆杆倾斜晃动。但球位置的换算用的是校准值
+    # （cm_per_pixel / pipe_center_x），与 live 端点无关 —— 所以关掉它
+    # 不影响测量精度，只影响「球跑到端点附近时盲区线的位置」。
+    #
+    # 稳球任务里球被控在中心 ±10mm，离端点很远，这个功能边际价值极低，
+    # 反而引入一个误判源（球本身可能影响最宽轮廓），故默认关闭。
+    # 若以后需要球贴到端点工作，改 True 即可恢复。
+    "mobile_end_tracking": False,
+
     # Candidate verification: dark fill, circular edge and local contrast.
     "min_fill_ratio": 0.12,
     "max_fill_ratio": 1.00,
@@ -779,13 +790,16 @@ def detect_pipe_and_ball(img, roi_top, roi_bottom, cfg, state):
         if not state.pipe_calibrated:
             return None
 
-    # Live pipe-end tracking: the mobile (tilting) end's blind line must
-    # follow the pipe when it moves up/down; the fixed end keeps the
-    # calibrated position.
-    if state.pipe_calibrated and (
-        state.scan_count % cfg["mobile_end_refresh_interval"] == 0
-    ):
-        refresh_mobile_end(gray, cfg, state)
+    # Live pipe-end tracking（默认关闭，见 CONFIG["mobile_end_tracking"]）。
+    # 开启时定期重检管道轮廓让活动端盲区线跟着倾斜移动；关闭时工作点
+    # 就是校准值 —— 位置换算本来就只认校准值，所以关掉不影响测量精度。
+    if state.pipe_calibrated:
+        if cfg["mobile_end_tracking"]:
+            if state.scan_count % cfg["mobile_end_refresh_interval"] == 0:
+                refresh_mobile_end(gray, cfg, state)
+        else:
+            state.pipe_live_x = state.pipe_x
+            state.pipe_live_w = state.pipe_w
 
     fixed_left = max(0, int(round(state.pipe_x)))
     fixed_right = min(gray.shape[1], int(round(state.pipe_x + state.pipe_w)))
