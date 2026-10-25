@@ -19,6 +19,8 @@
 /* 视觉数据借用旧控制器的解析器（临时；ctrl_v2 接入后改成自己的 link 层） */
 extern void     ball_ctrl_uart_poll(void);
 extern int32_t  ball_ctrl_ball_01mm(void);
+extern uint8_t  ball_ctrl_ball_ok(void);
+extern uint32_t ball_ctrl_frame_count(void);
 
 /* 调试日志走 PC6/PC7（USART6）。PA9/PA10 是与 MaixCam+主控的协议链路，
  * 自检输出绝不能发到那里，否则会污染 12 字节二进制帧。 */
@@ -47,7 +49,8 @@ typedef enum {
     S_T2_RUN,
     S_T3_PRE,
     S_T3_RUN,
-    S_DONE
+    S_DONE,
+    S_MONITOR          /* 自检结束后持续打印位置，供人工抬杆验证视觉 */
 } st_state_t;
 
 static st_state_t s_state;
@@ -152,8 +155,9 @@ void selftest_poll(void)
         if ((now - s_ts) >= T1_MEASURE_MS) {
             disp = st_x() - s_x_mark;
             if (disp < 0) disp = -disp;
-            st_printf("T1,%ld,%ld,%s\r\n", (long)s_ang, (long)disp,
-                      (disp >= T1_MOVED_01MM) ? "MOVE" : "STUCK");
+            st_printf("T1,%ld,%ld,%s,%u\r\n", (long)s_ang, (long)disp,
+                      (disp >= T1_MOVED_01MM) ? "MOVE" : "STUCK",
+                      (unsigned)ball_ctrl_ball_ok());
 
             if (disp >= T1_MOVED_01MM) {
                 s_thresh = s_ang;
@@ -201,8 +205,9 @@ void selftest_poll(void)
             st_enter(S_T3_PRE);
         } else if ((now - s_print_ts) >= 20U) {
             s_print_ts = now;
-            st_printf("T2,%lu,%ld\r\n",
-                      (unsigned long)(now - s_ts), (long)(st_x() - s_x_mark));
+            st_printf("T2,%lu,%ld,%u\r\n",
+                      (unsigned long)(now - s_ts), (long)(st_x() - s_x_mark),
+                      (unsigned)ball_ctrl_ball_ok());
         }
         break;
 
@@ -224,7 +229,12 @@ void selftest_poll(void)
         if ((now - s_ts) >= T3_HOLD_MS) {
             if (!s_t3_got) st_printf("T3_DELAY,NOT_FOUND\r\n");
             st_set_angle(0);
-            st_enter(S_DONE);
+            st_printf("\r\n# DONE —— 把上面输出复制保存为 CSV\r\n");
+            st_printf("# 进入手动验证：用手把摆杆一端抬高约 1cm，\r\n");
+            st_printf("#   同时看 M 行的位置值是否跟着大幅变化（跟手=视觉可用）\r\n");
+            st_printf("# M,<位置0.1mm>,<视觉有效>,<累计帧>\r\n");
+            s_print_ts = now - 200U;
+            st_enter(S_MONITOR);
         } else {
             x  = st_x();
             dx = x - s_x_mark;
@@ -236,20 +246,26 @@ void selftest_poll(void)
             }
             if ((now - s_print_ts) >= 20U) {
                 s_print_ts = now;
-                st_printf("T3,%lu,%ld\r\n", (unsigned long)(now - s_ts), (long)(x - s_x_mark));
+                st_printf("T3,%lu,%ld,%u\r\n", (unsigned long)(now - s_ts),
+                          (long)(x - s_x_mark), (unsigned)ball_ctrl_ball_ok());
             }
+        }
+        break;
+
+    case S_MONITOR:
+        /* 自检结束后的手动验证：持续打印位置，供人工抬摆杆对照。
+         * M,<位置x0.1mm>,<视觉是否有效检出>,<累计帧数> */
+        if ((now - s_print_ts) >= 100U) {
+            s_print_ts = now;
+            st_printf("M,%ld,%u,%lu\r\n", (long)st_x(),
+                      (unsigned)ball_ctrl_ball_ok(),
+                      (unsigned long)ball_ctrl_frame_count());
         }
         break;
 
     case S_DONE:
     default:
         break;
-    }
-
-    /* 跑到终点后只打印一次 */
-    if ((s_state == S_DONE) && (s_print_ts != 0xFFFFFFFFU)) {
-        s_print_ts = 0xFFFFFFFFU;
-        st_printf("\r\n# DONE —— 把上面全部输出复制保存为 CSV\r\n");
     }
 }
 
