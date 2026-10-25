@@ -82,6 +82,9 @@ int main(int argc, char **argv)
 
     /* 指标 */
     double max_overshoot_mm = 0.0;
+    double max_angle_mdeg = 0.0;      /* 全程 |下发角度| 峰值 */
+    long   n_angle = 0;
+    long   n_big_angle = 0;           /* |>0.3°| 的拍数，静置时应为 0 */
     double last_out_of_band_ms = 0.0;
     int    crossed = 0;
     double x_start;
@@ -199,6 +202,15 @@ int main(int argc, char **argv)
         }
         if (fabs(x_mm) >= 10.0) last_out_of_band_ms = t_ms;
 
+        /* 角度活动量：静置测试用。若控制器在球已稳住时还发脉冲，
+         * 这里会明显变大（一次 0.6° 脉冲就会拉到 600 以上）。 */
+        {
+            double aa = fabs((double)angle_cmd);
+            if (aa > max_angle_mdeg) max_angle_mdeg = aa;
+            n_angle++;
+            if (aa > 300.0) n_big_angle++;     /* 统计「大动作」拍数 */
+        }
+
         /* ---------- 5. 打印 ---------- */
         if (fmod(t_ms, 50.0) < 0.5) {
             printf("%7.0f %8.2f %8.2f %8.2f %7.1f %10d %8.3f %6d\n",
@@ -215,6 +227,8 @@ int main(int argc, char **argv)
     printf("最大反向过冲    : %.2f mm\n", max_overshoot_mm);
     printf("进入 ±10mm 时间 : %.0f ms\n", last_out_of_band_ms);
     printf("终值误差        : %.2f mm\n", x_mm);
+    printf("峰值角度输出    : %.0f mdeg\n", max_angle_mdeg);
+    printf("大动作(>0.3°)拍数: %ld / %ld\n", n_big_angle, n_angle);
     printf("是否收敛        : %s\n",
            (fabs(x_mm) < 3.0 && max_overshoot_mm < 15.0) ? "是" : "否");
     /* 判据按题目指标：球稳在 ±10mm 内即达标 */

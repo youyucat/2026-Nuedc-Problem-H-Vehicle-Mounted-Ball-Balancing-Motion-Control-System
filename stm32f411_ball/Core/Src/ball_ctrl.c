@@ -574,7 +574,12 @@ static int32_t control_update(uint32_t dt_ms)
 
     out       = clamp_i32(combined, -lim, lim);
     s_sat     = (abs_i32(combined) > lim) ? 1U : 0U;
+#if !BALL_USE_CTRL_V2
+    /* 旧 PD 路径没有独立的反馈遥测量，沿用最终输出来观测。
+     * ctrl_v2 路径下 fb 由 ball_v2_fb() 给出纯反馈项，这里不能再覆盖，
+     * 否则日志里的 fb 和 cmd 完全一样，看不出脉冲/偏置各占多少。 */
     s_fb_mdeg = out;
+#endif
     return out;
 }
 

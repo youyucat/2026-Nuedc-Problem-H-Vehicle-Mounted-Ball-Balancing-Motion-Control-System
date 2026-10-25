@@ -85,6 +85,23 @@ void ball_v2_default_cfg(ball_v2_cfg_t *cfg)
      * 0.5/0.9/1.3/1.7/2.1° 依次覆盖 0.56~2.3° 的阈值范围。 */
     cfg->stick_v_thresh_mms   = 8;
     cfg->stick_hold_ms        = 150;
+
+    /* 懒区（2026-10-25 实机数据三次修正）
+     *
+     * 实机现象：球稳到 ±1mm 后安静几秒，突然被一脚踢到 ±15mm。
+     * 日志铁证：x=-1.8mm 时输出 -1.251°，而 kp=30 的 P 项只能算出 -0.05°。
+     * 拆开是 pulse(-0.645°) + bias(-0.6°)。原因是——球在 ±1.8mm 时
+     * P 项只有 0.05°，远小于 1° 静摩擦阈值，所以「确实推不动」，
+     * 被状态机判成「卡住」→ 发脉冲 + 攒偏置 → 合力 1.3° 把球踢出去。
+     *
+     * 但 1.8mm 本来就在指标(±10mm)内，根本不需要动。所以加一个懒区：
+     * 误差小于此值就完全不介入（不发脉冲、不学偏置、清零自适应累加）。
+     * 宁可留着这几毫米余差，也不要为了归零把球踢飞。
+     *
+     * 取 40（4mm）：指标 10mm 留 2.5 倍余量，同时覆盖量化噪声(0.64mm)
+     * 和球的自然摆动。要更准调到 30，要更静调到 50。 */
+    cfg->stick_deadband_01mm  = 40;
+
     cfg->stick_pulse_mdeg     = 600;    /* 起始 0.6° */
     cfg->stick_pulse_step_mdeg = 500;   /* 每次没推动 +0.5° */
     /* 脉冲时序：实测静摩擦阈值约 1.0°（M,1000 会让球滚），而控制需要的
@@ -236,8 +253,20 @@ int32_t ball_v2_step(ball_v2_t *c, uint32_t now_ms)
     c->fb_mdeg = fb;
 
     /* ---------- 3. 机械零位慢学习（只修常驻不水平，不做积分） ---------- */
-    if ((abs_i32(c->v_est_mms) <= k->stick_v_thresh_mms) &&
-        (abs_i32(err_pred) > k->deadband_01mm)) {
+    if (abs_i32(err_pred) <= k->stick_deadband_01mm) {
+        /* 懒区：误差已在可接受范围，停止学习并缓慢泄放已有偏置。
+         * 偏置若残留 0.6°，会一直把球往一侧顶，叠加脉冲就能顶穿中线。 */
+        c->bias_acc_ms = 0;
+        if (c->bias_mdeg != 0) {
+            int32_t step = abs_i32(c->bias_mdeg) / 8;
+            if (step < 1) step = 1;
+            if (c->bias_mdeg > 0) {
+                c->bias_mdeg = (c->bias_mdeg > step) ? (c->bias_mdeg - step) : 0;
+            } else {
+                c->bias_mdeg = (c->bias_mdeg < -step) ? (c->bias_mdeg + step) : 0;
+            }
+        }
+    } else if (abs_i32(c->v_est_mms) <= k->stick_v_thresh_mms) {
         int32_t dv = (int32_t)(((int64_t)k->bias_max_mdeg * (int32_t)dt_ms) /
                                (k->bias_learn_ms > 0 ? k->bias_learn_ms : 1));
         c->bias_acc_ms += dt_ms;
@@ -251,43 +280,53 @@ int32_t ball_v2_step(ball_v2_t *c, uint32_t now_ms)
     }
 
     /* ---------- 4. 静摩擦状态机 ---------- */
-    if (c->pulse_dir != 0) {
-        /* 球已经动起来就立刻收脉冲，不等它跑完 */
-        if (abs_i32(c->v_est_mms) > k->stick_v_thresh_mms) {
-            c->pulse_dir  = 0;
-            c->pulse_ms   = 0;
-            c->pulse_mdeg = 0;
-            c->stick_tries = 0;     /* 推起来了，下次回到起始脉冲 */
-        }
-    }
-
-    if (c->pulse_dir == 0) {
-        if (abs_i32(c->v_est_mms) <= k->stick_v_thresh_mms) {
-            c->quiet_ms += dt_ms;
-        } else {
-            c->quiet_ms = 0;
-        }
-
-        if ((c->quiet_ms >= (uint32_t)k->stick_hold_ms) &&
-            (abs_i32(err_pred) > k->deadband_01mm)) {
-            dir = sign_i32(err_pred);
-            if (dir != 0) {
-                /* 脉冲起点随「连续推不动次数」递增：
-                 * 静摩擦随位置/清洁度变化，固定值要么推不动、要么踢飞。
-                 * 每次没推动就加大一档，球一动立刻回到起始值。 */
-                int32_t base = k->stick_pulse_mdeg +
-                               (int32_t)c->stick_tries * k->stick_pulse_step_mdeg;
-
-                if (c->stick_tries < 20U) c->stick_tries++;
-
-                c->pulse_dir  = dir;
+    if (abs_i32(err_pred) <= k->stick_deadband_01mm) {
+        /* 懒区：误差小到不值得动手。清空脉冲与自适应累加，
+         * 否则「连续推不动 +0.5°」会在下次出区时带着旧账一次踢很重。 */
+        c->pulse_dir   = 0;
+        c->pulse_ms    = 0;
+        c->pulse_mdeg  = 0;
+        c->quiet_ms    = 0;
+        c->stick_tries = 0;
+    } else {
+        if (c->pulse_dir != 0) {
+            /* 球已经动起来就立刻收脉冲，不等它跑完 */
+            if (abs_i32(c->v_est_mms) > k->stick_v_thresh_mms) {
+                c->pulse_dir  = 0;
                 c->pulse_ms   = 0;
-                /* 行程越远，脉冲略大一些，但不超过上限的 60% */
-                c->pulse_peak_mdeg = clamp_i32(
-                    base + abs_i32(err_pred) / 4,
-                    base,
-                    (k->angle_max_mdeg * 6) / 10);
+                c->pulse_mdeg = 0;
+                c->stick_tries = 0;     /* 推起来了，下次回到起始脉冲 */
+            }
+        }
+
+        if (c->pulse_dir == 0) {
+            if (abs_i32(c->v_est_mms) <= k->stick_v_thresh_mms) {
+                c->quiet_ms += dt_ms;
+            } else {
                 c->quiet_ms = 0;
+            }
+
+            if ((c->quiet_ms >= (uint32_t)k->stick_hold_ms) &&
+                (abs_i32(err_pred) > k->stick_deadband_01mm)) {
+                dir = sign_i32(err_pred);
+                if (dir != 0) {
+                    /* 脉冲起点随「连续推不动次数」递增：
+                     * 静摩擦随位置/清洁度变化，固定值要么推不动、要么踢飞。
+                     * 每次没推动就加大一档，球一动立刻回到起始值。 */
+                    int32_t base = k->stick_pulse_mdeg +
+                                   (int32_t)c->stick_tries * k->stick_pulse_step_mdeg;
+
+                    if (c->stick_tries < 20U) c->stick_tries++;
+
+                    c->pulse_dir  = dir;
+                    c->pulse_ms   = 0;
+                    /* 行程越远，脉冲略大一些，但不超过上限的 60% */
+                    c->pulse_peak_mdeg = clamp_i32(
+                        base + abs_i32(err_pred) / 4,
+                        base,
+                        (k->angle_max_mdeg * 6) / 10);
+                    c->quiet_ms = 0;
+                }
             }
         }
     }

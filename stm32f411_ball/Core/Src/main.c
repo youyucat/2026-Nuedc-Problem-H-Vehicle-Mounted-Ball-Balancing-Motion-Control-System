@@ -127,6 +127,26 @@ static void MX_USART1_UART_Init(void);
 
 /* USER CODE BEGIN PFP */
 static void dbg_printf(const char *fmt, ...);
+
+/* 定点数格式化：把 x10 或 mdeg 拆成「符号 + 整数 + 小数」。
+ * 旧写法 `(long)(v / 10), (long)labs(v % 10)` 在 |v| < 10 时
+ * 整数部分取整为 0，符号就丢了（x=-0.5 会打印成 "+0.5"，
+ * cmd=-0.333 会打印成 "+0.333"），调试时会被彻底误导。 */
+static void fmt_x10(char *out, size_t n, int32_t v)
+{
+    int32_t neg = (v < 0) ? 1 : 0;
+    int32_t a   = neg ? -v : v;
+    (void)snprintf(out, n, "%s%ld.%01ld", neg ? "-" : "+",
+                   (long)(a / 10), (long)(a % 10));
+}
+
+static void fmt_mdeg(char *out, size_t n, int32_t v)
+{
+    int32_t neg = (v < 0) ? 1 : 0;
+    int32_t a   = neg ? -v : v;
+    (void)snprintf(out, n, "%s%ld.%03ld", neg ? "-" : "+",
+                   (long)(a / 1000), (long)(a % 1000));
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -416,15 +436,20 @@ int main(void)
             int32_t ff = ball_ctrl_ff_mdeg();
             int32_t a  = ball_ctrl_accel();
             uint8_t c  = ball_ctrl_conf();
+            char sx[16], sref[16], scmd[16];
 
-            dbg_printf("[RUN] x=%+ld.%01ld v=%+ldmm/s c=%d ref=%+ld.%01ld | "
-                       "fb=%+ld ff=%+ld cmd=%+ld.%03lddeg acc=%+ld "
+            fmt_x10(sx, sizeof(sx), b);
+            fmt_x10(sref, sizeof(sref), rf);
+            fmt_mdeg(scmd, sizeof(scmd), t);
+
+            dbg_printf("[RUN] x=%s v=%+ldmm/s c=%d ref=%s | "
+                       "fb=%+ld ff=%+ld cmd=%sdeg acc=%+ld "
                        "sat=%d ok=%d cal=%d fr=%lu ce=%lu pos=%ld\r\n",
-                       (long)(b / 10), (long)labs(b % 10),
+                       sx,
                        (long)v, (int)c,
-                       (long)(rf / 10), (long)labs(rf % 10),
+                       sref,
                        (long)fb, (long)ff,
-                       (long)(t / 1000), (long)labs(t % 1000),
+                       scmd,
                        (long)a,
                        (int)ball_ctrl_sat(),
                        (int)ball_ctrl_ball_ok(),
