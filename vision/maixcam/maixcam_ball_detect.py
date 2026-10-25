@@ -44,6 +44,12 @@ CONFIG = {
     "cam_w": 640,
     "cam_h": 480,
 
+    # 性能相关：LCD 刷新和 overlay 绘制不是每帧都必须，降频可把 CPU 让给检测。
+    # display_every_n = 1 表示每帧都刷；3 表示每 3 帧刷一次。
+    # perf_log_ms > 0 时每 N 毫秒在终端打印一次实测帧率，0 = 关闭。
+    "display_every_n": 3,
+    "perf_log_ms": 5000,
+
     # Only the area between these horizontal lines accepts a ball center.
     "roi_top_ratio": 0.40,
     "roi_bottom_ratio": 0.50,
@@ -748,9 +754,16 @@ def refresh_mobile_end(gray, cfg, state):
 
 
 def detect_pipe_and_ball(img, roi_top, roi_bottom, cfg, state):
-    frame = image.image2cv(img, False, False)
-    roi = frame[roi_top:roi_bottom, :]
-    gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+    # 只把 ROI 这一条转成 numpy。
+    # 原来是「整幅 640x480 转完再切片」，90% 的像素白拷一遍，是主循环最大
+    # 的单笔开销。crop 在 C++ 层做，只拷真正要用的那几十行。
+    roi_h = roi_bottom - roi_top
+    if hasattr(img, "crop"):
+        roi_img = img.crop(0, roi_top, cfg["cam_w"], roi_h)
+        frame = image.image2cv(roi_img, False, False)
+    else:                                   # 老固件没有 crop 时降级
+        frame = image.image2cv(img, False, False)[roi_top:roi_bottom, :]
+    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
     now_ms = time.ticks_ms()
     motion_gray = None
     if (
@@ -1271,6 +1284,9 @@ def main():
     print("Open in browser: http://{}:{}".format(ip, CONFIG["web_port"]))
 
     try:
+        frame_i = 0
+        perf_t0 = time.ticks_ms()
+        perf_n = 0
         while not app.need_exit():
             rgb_img = rgb_cam.read()
             if rgb_img is None:
@@ -1284,16 +1300,30 @@ def main():
             )
             uart_link.send(result, state, time.ticks_ms())
             update_web_status(result, state)
-            draw_overlay(
-                rgb_img,
-                roi_top,
-                roi_bottom,
-                result,
-                state,
-                image_width,
-                image_height,
-            )
-            disp.show(rgb_img)
+            # overlay 与 LCD 刷新降频：这两步对控制没有贡献，但每帧都要
+            # 画几十个图元 + 一次全屏拷贝，占的 CPU 相当可观。
+            if frame_i % CONFIG["display_every_n"] == 0:
+                draw_overlay(
+                    rgb_img,
+                    roi_top,
+                    roi_bottom,
+                    result,
+                    state,
+                    image_width,
+                    image_height,
+                )
+                disp.show(rgb_img)
+            frame_i += 1
+
+            # 实测帧率（终端可见，用于判断优化是否生效）
+            perf_n += 1
+            elapsed_ms = time.ticks_ms() - perf_t0
+            if (CONFIG["perf_log_ms"] > 0 and
+                    elapsed_ms >= CONFIG["perf_log_ms"]):
+                print("[PERF] loop {:.1f} fps".format(
+                    perf_n * 1000.0 / max(1, elapsed_ms)))
+                perf_t0 = time.ticks_ms()
+                perf_n = 0
     finally:
         print("Stopping...")
         detector_server.stop()
