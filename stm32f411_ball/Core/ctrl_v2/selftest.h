@@ -23,7 +23,7 @@ extern "C" {
 
 /* 1 = 启用自检（正常控制让位）；0 = 完全不编译进固件 */
 #ifndef BALL_SELFTEST_ENABLE
-#define BALL_SELFTEST_ENABLE   (0)
+#define BALL_SELFTEST_ENABLE   (1)
 #endif
 
 void selftest_init(void);

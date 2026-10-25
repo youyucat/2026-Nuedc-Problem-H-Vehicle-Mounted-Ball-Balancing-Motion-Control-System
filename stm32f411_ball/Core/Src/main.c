@@ -28,6 +28,7 @@
 #include "stepper.h"
 #include "key.h"
 #include "ball_ctrl.h"
+#include "selftest.h"          /* 开环参数辨识（BALL_SELFTEST_ENABLE=0 时为空） */
 /* 编码器已退役（PA0 让给 KEY1），不再 include/调用 encoder 模块 */
 /* USER CODE END Includes */
 
@@ -201,6 +202,10 @@ int main(void)
   stepper_set_run_speed(STEPPER_SERVO_SPEED);   /* 稳球微动速度 */
   stepper_enable(1);                    /* 使能驱动器，电机上电保持力矩 */
 
+#if BALL_SELFTEST_ENABLE
+  selftest_init();                      /* 开环参数辨识：上电自动跑三段实验 */
+#endif
+
   dbg_printf("\r\n============================================\r\n");
   dbg_printf("[STEPPER] MOTER / STM32F411RET6 ready\r\n");
   dbg_printf("[TASK ] H题 要求4：滑模PD+前馈 行驶稳球（误差<=1cm）\r\n");
@@ -236,6 +241,10 @@ int main(void)
         s_last_tick = now;
         key_scan();
         stepper_tick_1ms();
+
+#if BALL_SELFTEST_ENABLE
+        selftest_poll();              /* 开环参数辨识状态机（非阻塞） */
+#endif
 
         /* 按键点头状态机：抬起到位 -> 回平 -> （按按键意图）启动闭环 */
         if (s_ack == ACK_UP && !stepper_is_busy()) {
