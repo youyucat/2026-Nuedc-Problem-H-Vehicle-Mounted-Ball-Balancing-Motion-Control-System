@@ -20,7 +20,9 @@
 extern void     ball_ctrl_uart_poll(void);
 extern int32_t  ball_ctrl_ball_01mm(void);
 
-extern UART_HandleTypeDef huart1;
+/* 调试日志走 PC6/PC7（USART6）。PA9/PA10 是与 MaixCam+主控的协议链路，
+ * 自检输出绝不能发到那里，否则会污染 12 字节二进制帧。 */
+extern UART_HandleTypeDef huart6;
 
 #define ROD_STEPS_PER_DEG   ((float)STEPPER_STEPS_PER_REV / 360.0f)
 #define T1_ANG_START        500      /* 0.5° */
@@ -71,7 +73,7 @@ static void st_printf(const char *fmt, ...)
     va_end(ap);
     if (n <= 0) return;
     if (n > (int)sizeof(buf) - 1) n = (int)sizeof(buf) - 1;
-    (void)HAL_UART_Transmit(&huart1, (uint8_t *)buf, (uint16_t)n, 50);
+    (void)HAL_UART_Transmit(&huart6, (uint8_t *)buf, (uint16_t)n, 50);
 }
 
 /* ------------------------------ 动作 ------------------------------ */

@@ -56,6 +56,11 @@ UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 #define USE_DEBUG_UART   1     /* 不用串口就改成 0 */
+#define USE_DEBUG_UART6  1     /* 板载调试口在 PC6/PC7(USART6) 时置 1 */
+
+/* 第二路调试串口：实际板子的调试口接在 PC6/PC7（USART6，AF8），
+ * 而 USART1 的 PA9 未必引出。两路同时输出，USB-TTL 接哪边都能看到日志。 */
+UART_HandleTypeDef huart6;
 
 /* ==================== H题 要求4：行驶稳球任务 ====================
  * 小车置于 A 点、钢球置于中心 O，按键启动后沿黑线顺时针行驶通过 B
@@ -135,12 +140,48 @@ static void dbg_printf(const char *fmt, ...)
 
     if (n > 0) {
         if (n > (int)sizeof(buf) - 1) n = (int)sizeof(buf) - 1;
+#if USE_DEBUG_UART6
+        /* 调试日志只走 PC6/PC7（USART6）。
+         * PA9/PA10 是与 MaixCam + 主控的协议链路，绝不能混入 ASCII 调试文本，
+         * 否则会污染 12 字节二进制帧。协议帧（W1/W0/W2）由 ball_ctrl 单独发。 */
+        HAL_UART_Transmit(&huart6, (uint8_t *)buf, (uint16_t)n, 100);
+#else
         HAL_UART_Transmit(&huart1, (uint8_t *)buf, (uint16_t)n, 100);
+#endif
     }
 #else
     (void)fmt;
 #endif
 }
+
+#if USE_DEBUG_UART6
+/* 板载调试口在 PC6/PC7 = USART6_TX/RX（AF8）。
+ * 手动配 GPIO+时钟，再交给 HAL_UART_Init；MspInit 是弱函数，为空即可。 */
+static void dbg_uart6_init(void)
+{
+    GPIO_InitTypeDef gpio = {0};
+
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    __HAL_RCC_USART6_CLK_ENABLE();
+
+    gpio.Pin       = GPIO_PIN_6 | GPIO_PIN_7;
+    gpio.Mode      = GPIO_MODE_AF_PP;
+    gpio.Pull      = GPIO_PULLUP;
+    gpio.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
+    gpio.Alternate = GPIO_AF8_USART6;
+    HAL_GPIO_Init(GPIOC, &gpio);
+
+    huart6.Instance          = USART6;
+    huart6.Init.BaudRate     = 115200;
+    huart6.Init.WordLength   = UART_WORDLENGTH_8B;
+    huart6.Init.StopBits     = UART_STOPBITS_1;
+    huart6.Init.Parity       = UART_PARITY_NONE;
+    huart6.Init.Mode         = UART_MODE_TX_RX;
+    huart6.Init.HwFlowCtl    = UART_HWCONTROL_NONE;
+    huart6.Init.OverSampling = UART_OVERSAMPLING_16;
+    (void)HAL_UART_Init(&huart6);
+}
+#endif
 /* USER CODE END 0 */
 
 /**
@@ -178,6 +219,9 @@ int main(void)
   MX_USART1_UART_Init();
 
   /* USER CODE BEGIN 2 */
+#if USE_DEBUG_UART6
+  dbg_uart6_init();                     /* 调试口 PC6/PC7，必须最先初始化 */
+#endif
   stepper_init();
   key_init();
   ball_ctrl_init();                     /* 含挂起 USART1 接收（摄像头/车主控数据） */
