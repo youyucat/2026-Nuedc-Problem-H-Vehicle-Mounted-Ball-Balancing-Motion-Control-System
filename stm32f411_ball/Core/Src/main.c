@@ -202,10 +202,6 @@ int main(void)
   stepper_set_run_speed(STEPPER_SERVO_SPEED);   /* 稳球微动速度 */
   stepper_enable(1);                    /* 使能驱动器，电机上电保持力矩 */
 
-#if BALL_SELFTEST_ENABLE
-  selftest_init();                      /* 开环参数辨识：上电自动跑三段实验 */
-#endif
-
   dbg_printf("\r\n============================================\r\n");
   dbg_printf("[STEPPER] MOTER / STM32F411RET6 ready\r\n");
   dbg_printf("[TASK ] H题 要求4：滑模PD+前馈 行驶稳球（误差<=1cm）\r\n");
@@ -228,6 +224,12 @@ int main(void)
   s_last_ctrl = s_last_tick;
   s_last_log  = s_last_tick;
   s_boot_tick = s_last_tick;
+
+  /* 自检放在横幅之后：横幅出来了说明固件已跑起来，
+   * 再看下面有没有 SELFTEST START，就能区分「固件没跑」和「自检起不来」 */
+#if BALL_SELFTEST_ENABLE
+  selftest_init();                      /* 开环参数辨识：上电自动跑三段实验 */
+#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
