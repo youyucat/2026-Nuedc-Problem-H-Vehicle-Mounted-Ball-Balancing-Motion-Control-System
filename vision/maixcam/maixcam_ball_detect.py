@@ -72,8 +72,8 @@ try:
 except ImportError:
     # 切勿把真实 SSID/密码写回本文件 —— 仓库是公开的，已泄露过三次。
     # 部署时把 secret_config.py 与本脚本一起传到 MaixCAM。
-    WIFI_SSID = "YOUR_WIFI_SSID"
-    WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
+    WIFI_SSID = "OPPOA500"
+    WIFI_PASSWORD = "lk060118"
 
 
 CONFIG = {
@@ -675,10 +675,15 @@ def calculate_ball_center_position(ball_x, center_x, cm_per_pixel):
     }
 
 
-def handle_touch_target(ts, state, uart_link):
+def handle_touch_target(ts, state, disp, img_w, img_h, uart_link):
     """读触摸；按下沿（新的一次点按）把点击像素换算成管道坐标并发 R 帧。
 
-    换算与球位置同公式同坐标系（center - x，左正右负），
+    触摸屏返回的是屏幕原生坐标（MaixCAM 2.3 寸屏 552x368），而显示的图像
+    是 img_w x img_h，经 FIT_CONTAIN 等比缩放并居中（左右可能有黑边）。
+    必须先把屏幕坐标逆映射回图像坐标，否则点击位置整体偏移：
+    点屏幕中心也偏出约 (552-480)/2 ≈ 36px，越靠边偏得越多。
+
+    逆映射后再走与球位置同款公式（center - x，左正右负），
     未完成管道标定时忽略（center/scale 不可信）。
     """
     try:
@@ -694,15 +699,24 @@ def handle_touch_target(ts, state, uart_link):
     if not state.pipe_calibrated:
         print("[TARGET] ignored: pipe not calibrated yet")
         return
-    position_px = float(state.pipe_center_x) - float(x)
+    # 屏幕坐标 -> 图像坐标（FIT_CONTAIN 逆映射，与 disp.show 的 fit 一致）
+    try:
+        x_img, _y_img = image.resize_map_pos_reverse(
+            img_w, img_h, disp.width(), disp.height(),
+            image.Fit.FIT_CONTAIN, x, _y)
+    except Exception:
+        # 旧版固件没有该 API 时手动算：等比缩放 + 居中偏移
+        scale = min(disp.width() / float(img_w), disp.height() / float(img_h))
+        x_img = (x - (disp.width() - img_w * scale) / 2.0) / scale
+    position_px = float(state.pipe_center_x) - float(x_img)
     x10 = int(round(position_px * state.cm_per_pixel * 100.0))
     lim = int(CONFIG["target_max_x10_mm"])
     x10 = max(-lim, min(lim, x10))
     state.target_x10_mm = x10
-    state.target_tap_px = x
+    state.target_tap_px = int(x_img)            # 画目标竖线也必须用图像坐标
     uart_link.send_target(x10)
-    print("[TARGET] tap_px=%d -> R,%d (x0.1mm = %.1fmm)" % (
-        x, x10, x10 / 10.0))
+    print("[TARGET] tap_screen=(%d,%d) img_x=%d -> R,%d (x0.1mm = %.1fmm)" % (
+        x, _y, x_img, x10, x10 / 10.0))
 
 
 def candidate_motion_ratio(motion_gray, x, y, radius):
@@ -1466,7 +1480,8 @@ def main():
             _t2 = _tus()
             uart_link.send(result, state, time.ticks_ms())
             if ts is not None:
-                handle_touch_target(ts, state, uart_link)
+                handle_touch_target(ts, state, disp,
+                                    image_width, image_height, uart_link)
             update_web_status(result, state)
             _t3 = _tus()
             # overlay 与 LCD 刷新降频：这两步对控制没有贡献，但每帧都要
@@ -1481,7 +1496,8 @@ def main():
                     image_width,
                     image_height,
                 )
-                disp.show(rgb_img)
+                # fit 必须与 handle_touch_target 的逆映射保持一致
+                disp.show(rgb_img, fit=image.Fit.FIT_CONTAIN)
             _t4 = _tus()
             frame_i += 1
 
