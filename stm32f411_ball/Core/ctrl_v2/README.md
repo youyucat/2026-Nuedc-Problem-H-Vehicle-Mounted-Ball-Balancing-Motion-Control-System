@@ -86,3 +86,50 @@ MDK-Lite 上限 32 KB，当前固件 25.8 KB，余量足够。
 - 未处理丢球/重捕获（需要视觉侧的 flags 位）
 - 未做角度上限的分段松弛（旧实现近端 ±10°/远端 ±14°）
 - 未做方向约束（只朝目标推、快速回中允许同侧刹车）
+
+---
+
+## 自检固件：开环参数辨识
+
+`selftest.c` / `selftest.h`，默认关闭（`BALL_SELFTEST_ENABLE = 0`，完全不编译进固件）。
+
+启用后上电自动跑三段**开环**实验（不跑任何控制律），把串口输出存成 CSV 即可取参数。
+
+### 接入（改 3 处代码 + 加 1 个文件）
+
+1. `selftest.h`：`#define BALL_SELFTEST_ENABLE (1)`
+2. `Core/Src/main.c` 第 ~202 行 `stepper_enable(1);` 之后加：
+   ```c
+   #if BALL_SELFTEST_ENABLE
+     selftest_init();
+   #endif
+   ```
+3. `Core/Src/main.c` 主循环 1ms 任务块内、`stepper_tick_1ms();` 之后加：
+   ```c
+   #if BALL_SELFTEST_ENABLE
+       selftest_poll();
+   #endif
+   ```
+4. Keil 工程里 Add Existing Files：`Core/ctrl_v2/selftest.c`
+
+### 串口输出格式
+
+| 行首 | 含义 |
+| --- | --- |
+| `#` | 注释/进度，可忽略 |
+| `T1,<角度mdeg>,<位移0.1mm>,MOVE\|STUCK` | 静摩擦扫描，每档一条 |
+| `# THRESHOLD=<mdeg>` | 找到的静摩擦突破角度 |
+| `T2,<t_ms>,<位移0.1mm>` | 加速度辨识，20ms 一条，共 5 秒 |
+| `T3,<t_ms>,<位移0.1mm>` | 延迟辨识，20ms 一条 |
+| `T3_DELAY,<ms>` | 从发命令到视觉检出位移的总延迟 |
+| `# DONE` | 全部结束 |
+
+### 时长
+
+静置 5s + 扫描（视阈值而定，最多 12 档 × 3.1s ≈ 37s）+ 5s + 2s ≈ **50 秒左右**。
+
+### 注意
+
+- 全程别碰导轨；上电后等自动点头结束（约 2s）再放球
+- 别按 KEY1，否则会启动闭环控制干扰实验
+- 跑完把开关改回 0 再编译正常固件
