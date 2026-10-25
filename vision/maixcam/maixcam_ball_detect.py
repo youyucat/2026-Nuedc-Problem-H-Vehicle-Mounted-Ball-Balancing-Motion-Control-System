@@ -38,6 +38,28 @@ def _tus():
 
 
 _LAST_HOUGH_US = 0      # detect 内部霍夫圆耗时（微秒），供主循环采样
+_LAST_PRE_US = 0        # 取图转换 + 滤波 + 阈值 + 形态学（到 Hough 之前）
+_LAST_VERIFY_US = 0     # 候选验证主循环
+
+# 候选评估用的掩膜缓冲。
+# evaluate_circle_candidate 原本对每个候选都 np.zeros 三个 65x65 数组，
+# 加上两次 bitwise_and 又各分配一个新数组 —— 每帧 5~8 个候选时，
+# 光是分配/回收就要 8~15ms。这里按尺寸缓存复用，每次只做 fill(0)。
+_MASK_CACHE = {}
+_MASK_CACHE_MAX = 24
+
+
+def _mask_buf(slot, shape):
+    """取一个该尺寸的 uint8 缓冲（slot 区分用途），返回时内容已清零。"""
+    key = (slot, shape)
+    buf = _MASK_CACHE.get(key)
+    if buf is None:
+        buf = np.zeros(shape, np.uint8)
+        if len(_MASK_CACHE) < _MASK_CACHE_MAX:
+            _MASK_CACHE[key] = buf
+    else:
+        buf.fill(0)
+    return buf
 
 
 # 本地私密配置：把 secret_config.example.py 复制为 secret_config.py 并填入
@@ -649,9 +671,11 @@ def evaluate_circle_candidate(gray, dark_mask, edges, x, y, radius, cfg):
     patch_edges = edges[y1:y2, x1:x2]
     center = (x - x1, y - y1)
     mask_shape = patch_gray.shape[:2]
-    inner_mask = np.zeros(mask_shape, np.uint8)
-    edge_mask = np.zeros(mask_shape, np.uint8)
-    outer_mask = np.zeros(mask_shape, np.uint8)
+    # 缓冲复用（见 _mask_buf）：返回时已清零，直接在上面画
+    inner_mask = _mask_buf(0, mask_shape)
+    edge_mask = _mask_buf(1, mask_shape)
+    outer_mask = _mask_buf(2, mask_shape)
+    and_buf = _mask_buf(3, mask_shape)
     cv2.circle(inner_mask, center, max(1, int(radius * 0.78)), 255, -1)
     cv2.circle(edge_mask, center, max(1, int(radius * 1.22)), 255, -1)
     cv2.circle(edge_mask, center, max(1, int(radius * 0.78)), 0, -1)
@@ -664,12 +688,11 @@ def evaluate_circle_candidate(gray, dark_mask, edges, x, y, radius, cfg):
     if inner_count == 0 or edge_count == 0 or outer_count == 0:
         return None
 
-    fill_ratio = float(cv2.countNonZero(
-        cv2.bitwise_and(patch_dark, inner_mask)
-    )) / inner_count
-    edge_ratio = float(cv2.countNonZero(
-        cv2.bitwise_and(patch_edges, edge_mask)
-    )) / edge_count
+    # bitwise_and 写入复用缓冲，避免每次调用再分配一个数组
+    cv2.bitwise_and(patch_dark, inner_mask, dst=and_buf)
+    fill_ratio = float(cv2.countNonZero(and_buf)) / inner_count
+    cv2.bitwise_and(patch_edges, edge_mask, dst=and_buf)
+    edge_ratio = float(cv2.countNonZero(and_buf)) / edge_count
     inner_mean = float(cv2.mean(patch_gray, mask=inner_mask)[0])
     outer_mean = float(cv2.mean(patch_gray, mask=outer_mask)[0])
     contrast = outer_mean - inner_mean
@@ -791,6 +814,8 @@ def refresh_mobile_end(gray, cfg, state):
 
 
 def detect_pipe_and_ball(img, roi_top, roi_bottom, cfg, state):
+    global _LAST_HOUGH_US, _LAST_PRE_US, _LAST_VERIFY_US
+    _t_fn = _tus()
     # 只把 ROI 这一条转成 numpy。
     # 原来是「整幅 640x480 转完再切片」，90% 的像素白拷一遍，是主循环最大
     # 的单笔开销。crop 在 C++ 层做，只拷真正要用的那几十行。
@@ -918,6 +943,7 @@ def detect_pipe_and_ball(img, roi_top, roi_bottom, cfg, state):
     dark_mask = cv2.morphologyEx(
         dark_mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8)
     )
+    _LAST_PRE_US = _tus() - _t_fn          # 取图转换+滤波+阈值+形态学
     _t_hough = _tus()
     edges = cv2.Canny(
         blur, max(10, cfg["hough_param1"] // 2), cfg["hough_param1"]
@@ -932,7 +958,6 @@ def detect_pipe_and_ball(img, roi_top, roi_bottom, cfg, state):
         minRadius=cfg["min_radius"],
         maxRadius=cfg["max_radius"],
     )
-    global _LAST_HOUGH_US
     _LAST_HOUGH_US = _tus() - _t_hough
     candidates = []
     if circles is not None:
@@ -991,6 +1016,7 @@ def detect_pipe_and_ball(img, roi_top, roi_bottom, cfg, state):
     adaptive_gate = cfg["tracking_gate_px"]
     if track_x is not None:
         adaptive_gate += int(round(abs(state.filter.vx) * 0.05))
+    _t_verify = _tus()
     for local_x, local_y, radius, quality_hint in candidates:
         global_x = int(local_x + detect_left)
         if global_x <= search_left or global_x >= search_right:
@@ -1058,6 +1084,8 @@ def detect_pipe_and_ball(img, roi_top, roi_bottom, cfg, state):
             challengers.append(item + (motion_ratio,))
         elif not outside_tracking_gate and score >= cfg["min_candidate_score"]:
             accepted.append(item)
+
+    _LAST_VERIFY_US = _tus() - _t_verify
 
     # A local tracker can stay attached to a static pipe feature forever.
     # During periodic full-pipe scans, let a verified moving circle outside
@@ -1335,7 +1363,7 @@ def main():
         perf_t0 = time.ticks_ms()
         perf_n = 0
         # 分段累计（微秒）：0=read 1=detect 2=send+web 3=display 4=hough
-        prof = [0, 0, 0, 0, 0]
+        prof = [0, 0, 0, 0, 0, 0, 0]
         while not app.need_exit():
             _t0 = _tus()
             rgb_img = rgb_cam.read()
@@ -1374,6 +1402,8 @@ def main():
             prof[2] += _t3 - _t2
             prof[3] += _t4 - _t3
             prof[4] += _LAST_HOUGH_US
+            prof[5] += _LAST_PRE_US
+            prof[6] += _LAST_VERIFY_US
 
             # 实测帧率与耗时分布（终端可见，定位瓶颈用）
             perf_n += 1
@@ -1382,20 +1412,24 @@ def main():
                     elapsed_ms >= CONFIG["perf_log_ms"]):
                 n = max(1, perf_n)
                 print(
-                    "[PERF] loop {:.1f} fps | "
-                    "read {:.1f} | detect {:.1f} (hough {:.1f}) | "
-                    "send {:.1f} | disp {:.1f} ms".format(
+                    "[PERF] loop {:.1f} fps | read {:.1f} | "
+                    "detect {:.1f} = pre {:.1f} + hough {:.1f} + "
+                    "verify {:.1f} + 其它 {:.1f} | send {:.1f} | "
+                    "disp {:.1f} ms".format(
                         perf_n * 1000.0 / max(1, elapsed_ms),
                         prof[0] / n / 1000.0,
                         prof[1] / n / 1000.0,
+                        prof[5] / n / 1000.0,
                         prof[4] / n / 1000.0,
+                        prof[6] / n / 1000.0,
+                        (prof[1] - prof[5] - prof[4] - prof[6]) / n / 1000.0,
                         prof[2] / n / 1000.0,
                         prof[3] / n / 1000.0,
                     )
                 )
                 perf_t0 = time.ticks_ms()
                 perf_n = 0
-                prof = [0, 0, 0, 0, 0]
+                prof = [0, 0, 0, 0, 0, 0, 0]
     finally:
         print("Stopping...")
         detector_server.stop()
