@@ -81,9 +81,13 @@ void ball_v2_default_cfg(ball_v2_cfg_t *cfg)
     cfg->stick_hold_ms        = 150;
     cfg->stick_pulse_mdeg     = 600;    /* 起始 0.6° */
     cfg->stick_pulse_step_mdeg = 500;   /* 每次没推动 +0.5° */
-    cfg->stick_ramp_ms        = 80;
-    cfg->stick_hold_plateau_ms = 120;
-    cfg->stick_relax_ms       = 100;
+    /* 脉冲时序：实测静摩擦阈值约 1.0°（M,1000 会让球滚），而控制需要的
+     * 精细角度只有 0.1~0.3°。若按原来的 80+120+100=300ms 持续给 1°，
+     * 球会被加速到 54mm/s、冲出去 8mm 以上 —— 小偏移时直接冲过头。
+     * 改成「点一下」：20+30+50=100ms，打破静摩擦给个初速度就收。 */
+    cfg->stick_ramp_ms        = 20;
+    cfg->stick_hold_plateau_ms = 30;
+    cfg->stick_relax_ms       = 50;
 
     /* 死区与偏置 */
     cfg->deadband_01mm = 8;

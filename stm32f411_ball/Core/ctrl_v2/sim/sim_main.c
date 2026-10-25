@@ -76,9 +76,9 @@ int main(int argc, char **argv)
     /* 静摩擦突破阈值（mm/s²）。
      * 第一版按 T1 数据推得 8，但台架实测稳态输出 ±0.8°（≈144 mm/s²）
      * 球仍不动 —— T1 那次「1° 让球动 2.6mm」反算只有 0.83 mm/s²，
-     * 是标定漂移而非滚动。按实机表现重新取 100（≈0.56°），
+     * 是标定漂移而非滚动。实测 M,1000（1.0°）会让球滚 → 阈值 ≤1.0°，取 180（1.0°），
      * 并用命令行参数扫 50~200 检查鲁棒性。 */
-    double g_a_break = 100.0;
+    double g_a_break = 180.0;
 
     /* 指标 */
     double max_overshoot_mm = 0.0;
@@ -217,6 +217,9 @@ int main(int argc, char **argv)
     printf("终值误差        : %.2f mm\n", x_mm);
     printf("是否收敛        : %s\n",
            (fabs(x_mm) < 3.0 && max_overshoot_mm < 15.0) ? "是" : "否");
+    /* 判据按题目指标：球稳在 ±10mm 内即达标 */
+    printf("达标(±10mm)     : %s\n",
+           (fabs(x_mm) < 10.0 && max_overshoot_mm < 10.0) ? "是" : "否");
     printf("======================================\n");
 
     return 0;
