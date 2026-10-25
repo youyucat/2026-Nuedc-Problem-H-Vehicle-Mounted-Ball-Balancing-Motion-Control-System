@@ -651,14 +651,8 @@ void ball_ctrl_init(void)
     ball_v2_default_cfg(&s_v2cfg);
     /* 角度上限跟工程限幅保持一致，避免 ctrl_v2 内部放行到机械极限 */
     s_v2cfg.angle_max_mdeg = BALL_CONTROL_MAX_MDEG;
-
-    /* 静摩擦脉冲：仿真里给 2.5° 是在「角度虚高 15 倍」的假设下试出来的。
-     * 标定后 2.5° 是真的 2.5°，会把球一脚踢飞。
-     * 台架旁证：旧固件命令 1°（真实 0.067°）就能让球从静止滚动，
-     * 说明真实静摩擦阈值远小于 0.1°。先取 0.3°（约阈值数倍）作为起点，
-     * 上机若球顶住不动再加，若一踢就飞再减。 */
-    s_v2cfg.stick_pulse_mdeg = 300;
-
+    /* 其余参数（kp=30 / kd=20 / pulse=200 / slew=36°/s / frame=34ms）
+     * 已在 ball_ctrl_v2.c 的 default_cfg 里按实测重新整定，此处不再覆盖。 */
     ball_v2_init(&s_v2, &s_v2cfg);
     ball_v2_set_target(&s_v2, s_xref_01mm);
 #endif

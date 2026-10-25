@@ -64,13 +64,14 @@ def _mask_buf(slot, shape):
 
 # 本地私密配置：把 secret_config.example.py 复制为 secret_config.py 并填入
 # 自己的 WiFi 账号密码。secret_config.py 已在 .gitignore 中，不会入库。
+# ⚠️ 部署到 MaixCAM 时必须把 secret_config.py 一起传上去，
+#    否则会落到下面的占位符、连不上热点。
 try:
     from secret_config import WIFI_SSID, WIFI_PASSWORD
 except ImportError:
-    # 占位符：真正的凭据放 secret_config.py（已被 .gitignore 忽略）。
-    # 切勿把真实 SSID/密码写回这里 —— 本仓库是公开的。
-    WIFI_SSID = "OPPOA500"
-    WIFI_PASSWORD = "lk060118"
+    # 切勿把真实 SSID/密码写回本文件 —— 仓库是公开的。
+    WIFI_SSID = "YOUR_WIFI_SSID"
+    WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
 
 
 CONFIG = {

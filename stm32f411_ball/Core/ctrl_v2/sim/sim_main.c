@@ -66,6 +66,16 @@ int main(int argc, char **argv)
     double next_ctrl_ms = 0.0;
     int32_t angle_cmd = 0;
 
+    /* 执行器实际角度（deg）。
+     * 早期仿真把 angle_cmd 直接当摆杆角度用，等于假设电机瞬间到位；
+     * 实测 STEPPER_SERVO_SPEED=2400pps、66.67 步/度 → 摆杆最大 36°/s，
+     * 要摆到 5° 需要 139ms。这个滞后和视觉延迟同量级，必须建模。 */
+    double angle_act = 0.0;
+    const double ACT_SLEW_DEG_S = 36.0;
+
+    /* 静摩擦突破阈值（mm/s²），可由命令行覆盖做敏感性分析 */
+    double g_a_break = 8.0;
+
     /* 指标 */
     double max_overshoot_mm = 0.0;
     double last_out_of_band_ms = 0.0;
@@ -76,19 +86,30 @@ int main(int argc, char **argv)
 
     ball_v2_default_cfg(&cfg);
 
-    /* 可选命令行调参：./sim_ctrl [x0] [kp] [kd] [delay_ms] [pulse_mdeg] */
+    /* 可选命令行调参：
+     * ./sim_ctrl [x0] [kp] [kd] [delay_ms] [pulse_mdeg] [gain] [a_break] */
     if (argc > 2) cfg.kp_mdeg_per_mm   = atoi(argv[2]);
     if (argc > 3) cfg.kd_mdeg_per_mm_s = atoi(argv[3]);
     if (argc > 4) cfg.loop_delay_ms    = atoi(argv[4]);
     if (argc > 5) cfg.stick_pulse_mdeg = atoi(argv[5]);
+    if (argc > 6) cfg.gain_mm_s2_per_deg = atoi(argv[6]);
+    if (argc > 7) g_a_break = atof(argv[7]);
 
     plant.gain         = (double)cfg.gain_mm_s2_per_deg;
-    plant.a_break      = 400.0;    /* 约 2.2° 才推得动，对应实测需要 5° 脉冲 */
-    plant.a_roll       = 30.0;
+    /* 静摩擦阈值：2026-10-25 角度标定后重算。
+     * 早期 T1 扫描时角度虚高 15 倍（命令 1° 实际只有 0.067°），
+     * 那时命令 1° 就能让球从静止滚动 → 真实阈值 < 0.067° × 180 ≈ 12 mm/s²。
+     * 所以原来的 400（≈2.2°）是错的，且「需要 5° 脱困脉冲」这个结论也作废。
+     * 取 8 mm/s²（≈0.044°），并可扫 5/8/20 做敏感性。 */
+    plant.a_break      = g_a_break;
+    /* 滚动阻力：钢球在钢/铝上的滚动阻力系数约 0.001~0.002 → 10~20 mm/s² */
+    plant.a_roll       = 10.0;
     plant.rail_half_mm = 125.0;
 
+    /* 视觉链路（实测 29fps / 480x360）：
+     *   period 34.5ms，1px = 0.64mm，检测耗时 24.5ms 已计入延迟 */
     vis.period_ms = (double)cfg.frame_period_ms;
-    vis.delay_ms  = 40.0;
+    vis.delay_ms  = 50.0;
     vis.noise_mm  = 0.15;
 
     ball_v2_init(&ctrl, &cfg);
@@ -100,14 +121,25 @@ int main(int argc, char **argv)
 
     printf("# 初始偏移 %.1f mm, gain=%.0f, delay=%dms, kp=%d, kd=%d\n",
            x0_mm, plant.gain, cfg.loop_delay_ms, cfg.kp_mdeg_per_mm, cfg.kd_mdeg_per_mm_s);
-    printf("#   t_ms   x_true   x_meas    v_true   v_est   angle_mdeg  pulse\n");
+    printf("#   t_ms   x_true   x_meas    v_true   v_est   angle_cmd  act_deg  pulse\n");
 
     while (t_ms < 8000.0) {
+
+        /* ---------- 0. 执行器：36°/s 斜率限幅 ---------- */
+        {
+            double target_deg = (double)angle_cmd / 1000.0;
+            double max_step   = ACT_SLEW_DEG_S * dt_ms / 1000.0;
+            double diff       = target_deg - angle_act;
+
+            if (diff >  max_step) diff =  max_step;
+            if (diff < -max_step) diff = -max_step;
+            angle_act += diff;
+        }
 
         /* ---------- 1. 被控对象积分 ---------- */
         {
             /* 符号约定：正角抬高 +x 端 → 球向 -x 加速 */
-            double a_drive = -plant.gain * ((double)angle_cmd / 1000.0);  /* mm/s² */
+            double a_drive = -plant.gain * angle_act;                     /* mm/s² */
             double a = 0.0;
 
             if (fabs(v_mms) < 1.0 && fabs(a_drive) < plant.a_break) {
@@ -129,7 +161,8 @@ int main(int argc, char **argv)
         /* ---------- 2. 视觉采样与延迟 ---------- */
         if (t_ms >= next_sample_ms) {
             double meas = x_mm + rnd_noise(vis.noise_mm);   /* mm */
-            meas = floor(meas * 10.0 + 0.5) / 10.0;         /* 量化到 0.1mm */
+            /* 480x360 下 1 像素 = 0.64mm：量化到像素网格，而不是理想的 0.1mm */
+            meas = floor(meas / 0.64 + 0.5) * 0.64;
             if (fifo_n < FIFO_MAX) meas_fifo[fifo_n++] = meas;
             next_sample_ms += vis.period_ms;
         }
@@ -164,10 +197,10 @@ int main(int argc, char **argv)
 
         /* ---------- 5. 打印 ---------- */
         if (fmod(t_ms, 50.0) < 0.5) {
-            printf("%7.0f %8.2f %8.2f %8.2f %7.1f %10d %6d\n",
+            printf("%7.0f %8.2f %8.2f %8.2f %7.1f %10d %8.3f %6d\n",
                    t_ms, x_mm, (double)ball_v2_pos(&ctrl) / 10.0,
                    v_mms, (double)ball_v2_vel(&ctrl),
-                   angle_cmd, ball_v2_pulse(&ctrl));
+                   angle_cmd, angle_act, ball_v2_pulse(&ctrl));
         }
 
         t_ms += dt_ms;

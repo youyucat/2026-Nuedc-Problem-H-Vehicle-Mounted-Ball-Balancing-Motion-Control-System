@@ -21,6 +21,11 @@ MaixCam 上运行的小球识别程序：Pi 上跑 OpenCV 圆检测 + 管道标�
    vi secret_config.py        # 填 WIFI_SSID / WIFI_PASSWORD
    ```
 
+   > ⚠️ **`secret_config.py` 必须单独存在于设备上。**
+   > 主脚本里只有占位符，缺了这个文件会连不上热点。
+   > 如果嫌每次在设备上重新填麻烦，就在本地填好 `secret_config.py`
+   > 后把**两个文件一起**传上去 —— 它是被 .gitignore 忽略的，不会进仓库。
+
 3. 运行：
 
    ```bash
