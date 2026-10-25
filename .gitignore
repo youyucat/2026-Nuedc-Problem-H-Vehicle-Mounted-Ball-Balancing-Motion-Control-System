@@ -92,3 +92,7 @@ secret_config.py
 sim_ctrl
 sim_ctrl.exe
 stm32f411_ball/Core/ctrl_v2/sim/*.txt
+
+# ---------------- mspm0 PC 仿真产物 ----------------
+mspm0_line_follow/sim/sim_line
+mspm0_line_follow/sim/sim_line.exe
