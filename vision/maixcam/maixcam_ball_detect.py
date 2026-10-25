@@ -17,6 +17,7 @@ from maix import (
     network,
     pinmap,
     time,
+    touchscreen,
     uart,
     webrtc,
 )
@@ -69,7 +70,8 @@ def _mask_buf(slot, shape):
 try:
     from secret_config import WIFI_SSID, WIFI_PASSWORD
 except ImportError:
-    # 切勿把真实 SSID/密码写回本文件 —— 仓库是公开的。
+    # 切勿把真实 SSID/密码写回本文件 —— 仓库是公开的，已泄露过三次。
+    # 部署时把 secret_config.py 与本脚本一起传到 MaixCAM。
     WIFI_SSID = "YOUR_WIFI_SSID"
     WIFI_PASSWORD = "YOUR_WIFI_PASSWORD"
 
@@ -84,6 +86,11 @@ CONFIG = {
     "uart_device": "/dev/ttyS1",
     "uart_baud": 115200,
     "uart_period_ms": 20,
+    # 触摸定点：在 MaixCam 屏幕上点一下，把点击位置换算成管道坐标，
+    # 发 ASCII 行 "R,<x0.1mm>\n" 给滚球板（STM32 端 R 命令已实现，
+    # 限幅 ±120mm）。False = 关闭（回固定中点，R 不再发送）。
+    "target_touch_enable": True,
+    "target_max_x10_mm": 1200,   # 与 STM32 端 ROD_HALF_LEN_MM=120 对齐
     # 分辨率：从 640x480 降到 480x360（0.75 倍）。
     #
     # 依据实测分段：detect 36ms = pre 18 + hough 11.4 + verify 3.5 + 其它 3。
@@ -291,6 +298,12 @@ class VisionUartLink:
         frame[11] = (crc >> 8) & 0xFF
         self.port.write(bytes(frame))
         self.sequence = (self.sequence + 1) & 0xFF
+
+    def send_target(self, x10_mm):
+        """触摸定点：发 ASCII 行 R,<x0.1mm>（无校验，STM32 端校验可选）。
+        与二进制位置帧共用同一路 UART1，STM32 行解析器按首字母分发。"""
+        x10_mm = max(-32768, min(32767, int(x10_mm)))
+        self.port.write(("R,%d\r\n" % x10_mm).encode("ascii"))
 
 
 STATUS_LOCK = threading.Lock()
@@ -618,6 +631,9 @@ class Cv2State:
         self.challenger_count = 0
         self.challenger_last_ms = None
         self.previous_gray = None
+        # 触摸定点状态：None = 未设置（滚球板默认回中点 0）
+        self.target_x10_mm = None
+        self.target_tap_px = None
         self.suspect_stationary_frames = 0
         self.stationary_suspect = False
         self.suspect_recovery_frames = 0
@@ -657,6 +673,36 @@ def calculate_ball_center_position(ball_x, center_x, cm_per_pixel):
         "position_px": position_px,
         "position_cm": position_px * scale,
     }
+
+
+def handle_touch_target(ts, state, uart_link):
+    """读触摸；按下沿（新的一次点按）把点击像素换算成管道坐标并发 R 帧。
+
+    换算与球位置同公式同坐标系（center - x，左正右负），
+    未完成管道标定时忽略（center/scale 不可信）。
+    """
+    try:
+        x, _y, pressed = ts.read()
+    except Exception:
+        return
+    if not pressed:
+        state._tap_was_down = False
+        return
+    if getattr(state, "_tap_was_down", False):
+        return                                  # 持续按住：只取按下沿
+    state._tap_was_down = True
+    if not state.pipe_calibrated:
+        print("[TARGET] ignored: pipe not calibrated yet")
+        return
+    position_px = float(state.pipe_center_x) - float(x)
+    x10 = int(round(position_px * state.cm_per_pixel * 100.0))
+    lim = int(CONFIG["target_max_x10_mm"])
+    x10 = max(-lim, min(lim, x10))
+    state.target_x10_mm = x10
+    state.target_tap_px = x
+    uart_link.send_target(x10)
+    print("[TARGET] tap_px=%d -> R,%d (x0.1mm = %.1fmm)" % (
+        x, x10, x10 / 10.0))
 
 
 def candidate_motion_ratio(motion_gray, x, y, radius):
@@ -1333,6 +1379,22 @@ def draw_overlay(img, roi_top, roi_bottom, cv2_result, state, image_width, image
         scale=1.0,
     )
 
+    # 触摸定点标记：黄色竖线画在点击像素处 + 当前 R 值
+    if state.target_x10_mm is not None and state.target_tap_px is not None:
+        tap = int(state.target_tap_px)
+        img.draw_line(tap, roi_top, tap, roi_bottom - 1,
+                      image.COLOR_YELLOW, 2)
+        img.draw_circle(tap, (roi_top + roi_bottom) // 2, 10,
+                        image.COLOR_YELLOW, thickness=2)
+        img.draw_string(
+            max(0, tap - 40),
+            roi_bottom + 6,
+            "TARGET R=%+d (%+.1fmm)" % (state.target_x10_mm,
+                                        state.target_x10_mm / 10.0),
+            image.COLOR_YELLOW,
+            scale=1.0,
+        )
+
 
 def main():
     print("MaixCAM ball detection: fast tracking + motion reacquisition v2")
@@ -1373,6 +1435,13 @@ def main():
     roi_bottom = int(image_height * CONFIG["roi_bottom_ratio"])
     state = Cv2State(image_width, CONFIG)
     uart_link = VisionUartLink(CONFIG)
+    ts = None
+    if CONFIG.get("target_touch_enable"):
+        try:
+            ts = touchscreen.TouchScreen()
+            print("TouchScreen ready: tap on pipe to set ball target (R frame)")
+        except Exception as exc:                     # 无屏/驱动异常时降级
+            print("TouchScreen unavailable, target fixed at center:", exc)
     print("Open in browser: http://{}:{}".format(ip, CONFIG["web_port"]))
 
     try:
@@ -1396,6 +1465,8 @@ def main():
             )
             _t2 = _tus()
             uart_link.send(result, state, time.ticks_ms())
+            if ts is not None:
+                handle_touch_target(ts, state, uart_link)
             update_web_status(result, state)
             _t3 = _tus()
             # overlay 与 LCD 刷新降频：这两步对控制没有贡献，但每帧都要
