@@ -674,7 +674,10 @@ void ball_ctrl_start(void)
     s_level_pos = stepper_position();
     s_conf      = 255U;
     s_accel     = 0;
-    s_xref_01mm = 0;
+    /* 目标只来自触摸 R 帧：启动时目标 = 球当前位置（原地保持），
+     * 不再默认回中点 —— 中点仅在屏幕上做显示标记，无引导作用。
+     * 球尚未检出时 s_ball_01mm 为 0，兜底同旧行为（平衡在标定原点）。 */
+    s_xref_01mm = s_ball_01mm;
     s_ball_ok   = 0;
     s_manual    = 0;
     s_fault     = 0;
