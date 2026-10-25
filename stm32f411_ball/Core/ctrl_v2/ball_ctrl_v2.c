@@ -100,7 +100,7 @@ void ball_v2_default_cfg(ball_v2_cfg_t *cfg)
      *
      * 取 40（4mm）：指标 10mm 留 2.5 倍余量，同时覆盖量化噪声(0.64mm)
      * 和球的自然摆动。要更准调到 30，要更静调到 50。 */
-    cfg->stick_deadband_01mm  = 40;
+    cfg->stick_deadband_01mm  = 15;
 
     cfg->stick_pulse_mdeg     = 600;    /* 起始 0.6° */
     cfg->stick_pulse_step_mdeg = 500;   /* 每次没推动 +0.5° */
