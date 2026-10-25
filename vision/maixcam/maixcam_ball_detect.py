@@ -1393,13 +1393,19 @@ def draw_overlay(img, roi_top, roi_bottom, cv2_result, state, image_width, image
         scale=1.0,
     )
 
-    # 触摸定点标记：黄色竖线画在点击像素处 + 当前 R 值
+    # 触摸定点标记：黄色竖线画在点击像素处 + 当前 R 值。
+    # 圈半径 24px（约 14mm）：控制稳态残差受懒区+静摩擦脉冲落点限制，
+    # 球心通常停在目标 ±3~10mm 处，10px 的小圈会被球压在圈边。
+    # 圈只是"到达判定区"，圈心十字才是精确目标。
     if state.target_x10_mm is not None and state.target_tap_px is not None:
         tap = int(state.target_tap_px)
+        tap_cy = (roi_top + roi_bottom) // 2
         img.draw_line(tap, roi_top, tap, roi_bottom - 1,
                       image.COLOR_YELLOW, 2)
-        img.draw_circle(tap, (roi_top + roi_bottom) // 2, 10,
+        img.draw_circle(tap, tap_cy, 24,
                         image.COLOR_YELLOW, thickness=2)
+        img.draw_cross(tap, tap_cy, image.COLOR_YELLOW,
+                       size=8, thickness=2)
         img.draw_string(
             max(0, tap - 40),
             roi_bottom + 6,
