@@ -58,6 +58,8 @@ typedef enum {
     S_T5_SET,
     S_T5_HOLD,
     S_T5_BACK,
+    S_T6_SET,
+    S_T6_HOLD,
     S_DONE,
     S_MONITOR          /* 自检结束后持续打印位置，供人工抬杆验证视觉 */
 } st_state_t;
@@ -81,6 +83,13 @@ static const int32_t  T5_ANGLE   = 15000;
 
 /* 自检结束时把摆杆保持在这个角度，供尺子测量末端抬升量 */
 #define T4_HOLD_ANGLE   25000
+
+/* T6 斜率标定：用更大的命令角提高水平仪的分辨率。
+ * 水平仪 1° 分辨率，25°->2° 的量化误差 ±25%；
+ * 75°->6° 时误差降到 ±8%，三点拟合更准。 */
+static const int32_t T6_ANGLES[] = { 25000, 50000, 75000 };
+#define T6_ANGLE_N   (sizeof(T6_ANGLES) / sizeof(T6_ANGLES[0]))
+#define T6_HOLD_MS   4000U
 
 static st_state_t s_state;
 static uint32_t   s_ts;          /* 进入当前状态的时刻 */
@@ -279,6 +288,31 @@ void selftest_poll(void)
         }
         break;
 
+    /* ---------- 阶段 6：斜率标定（配合水平仪） ---------- */
+    case S_T6_SET:
+        st_set_angle(T6_ANGLES[s_t4_idx]);
+        st_printf("# T6 命令 %ld mdeg（%ld 度）—— 读水平仪并记下\r\n",
+                  (long)T6_ANGLES[s_t4_idx], (long)(T6_ANGLES[s_t4_idx] / 1000));
+        st_enter(S_T6_HOLD);
+        break;
+
+    case S_T6_HOLD:
+        if ((now - s_ts) >= T6_HOLD_MS) {
+            /* T6,<命令角mdeg>,<步进绝对位置> —— 与水平仪读数配对 */
+            st_printf("T6,%ld,%ld\r\n",
+                      (long)T6_ANGLES[s_t4_idx], (long)stepper_position());
+            s_t4_idx++;
+            if (s_t4_idx >= (uint8_t)T6_ANGLE_N) {
+                st_set_angle(0);
+                st_printf("\r\n# DONE —— 把 T6 三行 + 对应水平仪读数一起发回\r\n");
+                s_print_ts = now - 200U;
+                st_enter(S_MONITOR);
+            } else {
+                st_enter(S_T6_SET);
+            }
+        }
+        break;
+
     case S_MONITOR:
         /* 自检结束后的手动验证：持续打印位置，供人工抬摆杆对照。
          * M,<球位置0.1mm>,<视觉有效>,<累计帧>,<步进绝对位置>,<忙> */
@@ -350,19 +384,8 @@ void selftest_poll(void)
             s_t4_idx++;
             if (s_t4_idx >= (uint8_t)T5_SPEED_N) {
                 stepper_set_run_speed(STEPPER_SERVO_SPEED);   /* 恢复稳球速度 */
-                /* 停在一个已知角度不动，方便用尺子量摆杆末端抬升高度。
-                 * 这是标定「命令角 -> 真实倾角」最直接的办法。 */
-                st_set_angle(T4_HOLD_ANGLE);
-                st_printf("\r\n# DONE —— 把上面输出复制保存为 CSV\r\n");
-                st_printf("# 摆杆现在保持在 %ld mdeg（%ld.%03ld 度），不要动它\r\n",
-                          (long)T4_HOLD_ANGLE,
-                          (long)(T4_HOLD_ANGLE / 1000),
-                          (long)(T4_HOLD_ANGLE % 1000));
-                st_printf("# 【请用尺子量】摆杆活动端比水平位置抬高了多少 mm\r\n");
-                st_printf("# 参考：手抬约 10mm 时球能跑满导轨\r\n");
-                st_printf("# M,<球位置>,<视觉>,<帧>,<步进位置>,<忙>\r\n");
-                s_print_ts = now - 200U;
-                st_enter(S_MONITOR);
+                s_t4_idx = 0;
+                st_enter(S_T6_SET);                           /* 进入斜率标定 */
             } else {
                 st_enter(S_T5_SET);
             }
