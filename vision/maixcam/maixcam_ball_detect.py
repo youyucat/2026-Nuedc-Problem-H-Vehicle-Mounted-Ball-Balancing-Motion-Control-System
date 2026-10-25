@@ -22,6 +22,24 @@ from maix import (
 )
 
 
+# ---------------------------------------------------------------------------
+# 分段计时（定位帧率瓶颈用）
+# 帧率上不去时不能靠猜，必须先看时间花在哪：
+#   read   摄像头取帧（可能是 sensor 帧率或 buffer 阻塞）
+#   detect 检测总耗时，其中 hough 是 OpenCV 霍夫圆，通常最大
+#   send   UART 组帧发送 + Web 状态 JSON
+#   disp   overlay 绘制 + LCD 刷新（已降频，按实际摊销）
+# ---------------------------------------------------------------------------
+_HAS_US = hasattr(time, "ticks_us")
+
+
+def _tus():
+    return time.ticks_us() if _HAS_US else time.ticks_ms() * 1000
+
+
+_LAST_HOUGH_US = 0      # detect 内部霍夫圆耗时（微秒），供主循环采样
+
+
 # 本地私密配置：把 secret_config.example.py 复制为 secret_config.py 并填入
 # 自己的 WiFi 账号密码。secret_config.py 已在 .gitignore 中，不会入库。
 try:
@@ -892,6 +910,7 @@ def detect_pipe_and_ball(img, roi_top, roi_bottom, cfg, state):
     dark_mask = cv2.morphologyEx(
         dark_mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8)
     )
+    _t_hough = _tus()
     edges = cv2.Canny(
         blur, max(10, cfg["hough_param1"] // 2), cfg["hough_param1"]
     )
@@ -905,6 +924,8 @@ def detect_pipe_and_ball(img, roi_top, roi_bottom, cfg, state):
         minRadius=cfg["min_radius"],
         maxRadius=cfg["max_radius"],
     )
+    global _LAST_HOUGH_US
+    _LAST_HOUGH_US = _tus() - _t_hough
     candidates = []
     if circles is not None:
         for x, y, radius in np.round(circles[0]).astype("int"):
@@ -1301,8 +1322,12 @@ def main():
         frame_i = 0
         perf_t0 = time.ticks_ms()
         perf_n = 0
+        # 分段累计（微秒）：0=read 1=detect 2=send+web 3=display 4=hough
+        prof = [0, 0, 0, 0, 0]
         while not app.need_exit():
+            _t0 = _tus()
             rgb_img = rgb_cam.read()
+            _t1 = _tus()
             if rgb_img is None:
                 continue
             result = detect_pipe_and_ball(
@@ -1312,8 +1337,10 @@ def main():
                 CONFIG,
                 state,
             )
+            _t2 = _tus()
             uart_link.send(result, state, time.ticks_ms())
             update_web_status(result, state)
+            _t3 = _tus()
             # overlay 与 LCD 刷新降频：这两步对控制没有贡献，但每帧都要
             # 画几十个图元 + 一次全屏拷贝，占的 CPU 相当可观。
             if frame_i % CONFIG["display_every_n"] == 0:
@@ -1327,17 +1354,36 @@ def main():
                     image_height,
                 )
                 disp.show(rgb_img)
+            _t4 = _tus()
             frame_i += 1
 
-            # 实测帧率（终端可见，用于判断优化是否生效）
+            prof[0] += _t1 - _t0
+            prof[1] += _t2 - _t1
+            prof[2] += _t3 - _t2
+            prof[3] += _t4 - _t3
+            prof[4] += _LAST_HOUGH_US
+
+            # 实测帧率与耗时分布（终端可见，定位瓶颈用）
             perf_n += 1
             elapsed_ms = time.ticks_ms() - perf_t0
             if (CONFIG["perf_log_ms"] > 0 and
                     elapsed_ms >= CONFIG["perf_log_ms"]):
-                print("[PERF] loop {:.1f} fps".format(
-                    perf_n * 1000.0 / max(1, elapsed_ms)))
+                n = max(1, perf_n)
+                print(
+                    "[PERF] loop {:.1f} fps | "
+                    "read {:.1f} | detect {:.1f} (hough {:.1f}) | "
+                    "send {:.1f} | disp {:.1f} ms".format(
+                        perf_n * 1000.0 / max(1, elapsed_ms),
+                        prof[0] / n / 1000.0,
+                        prof[1] / n / 1000.0,
+                        prof[4] / n / 1000.0,
+                        prof[2] / n / 1000.0,
+                        prof[3] / n / 1000.0,
+                    )
+                )
                 perf_t0 = time.ticks_ms()
                 perf_n = 0
+                prof = [0, 0, 0, 0, 0]
     finally:
         print("Stopping...")
         detector_server.stop()
