@@ -310,6 +310,8 @@ static void running_step(uint32_t now_ms)
             line_error_in = 0;
         }
         line_controller_step(&s_controller, line_error_in,
+                             (int16_t)(speed.right_speed_mm_s -
+                                       speed.left_speed_mm_s),
                              &left_target, &right_target);
         limit_line_correction(&left_target, &right_target);
         s_last_valid_left_target = left_target;

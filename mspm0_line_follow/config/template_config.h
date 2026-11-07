@@ -47,7 +47,7 @@
 #define TEMPLATE_DEFAULT_KP_MILLI       120
 #define TEMPLATE_DEFAULT_KD_MILLI       130
 /* 打角限幅：左右目标速度之差的一半，最大 120 mm/s。 */
-#define TEMPLATE_LINE_MAX_CORRECTION_MM_S 120
+#define TEMPLATE_LINE_MAX_CORRECTION_MM_S 300
 
 /* ---------- 丢线恢复 ---------- */
 /* 先保持最后有效目标 HOLD_MS，然后进入左右交替摇头扫描（每 SWEEP_MS 换向，
