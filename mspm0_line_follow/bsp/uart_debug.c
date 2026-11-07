@@ -23,17 +23,17 @@
 #include "hal/hal_time.h"
 #include "services/line_processing.h"
 
-/* ===================== 波特率分频（UART 功能时钟 = MFPCLK 32 MHz） ===================== */
-/* MSPM0 的 UART 功能时钟走 PD1 BUSCLK，而 syscfg 已开启 MFPCLK
- * （SYSOSC 32MHz 直通，见 .syscfg 的 MFPCLKGATE/MFCLKGATE）——所以
- * 分频基数是 32MHz，不是 ULPCLK 40MHz 也不是 MCLK 80MHz！
- * 两次实测踩坑记录：40M 假设 → 实际 92.2k；80M 假设 → 实际 46.1k，
- * 115200 终端都是乱码。现按原版 empty 工程验证值 IBRD=17/FBRD=23
- * （实际 115211.52，误差 0.01%）。 */
+/* ===================== 波特率分频（时钟源 = MFCLK，固定 4 MHz） ===================== */
+/* BUSCLK/MFPCLK 路径连续两版分频假设（40M/80M/32M）实测全乱码，
+ * 不再赌时钟树推导 —— CLKSEL 直接选 MFCLK：硬件固定 SYSOSC/8 = 4MHz，
+ * 与 power domain、时钟树门控完全无关，频率 100% 确定。
+ * 4MHz ≥ 16×115200 = 1.8443 MHz，满足 16X 过采样要求。
+ * divisor = 4M/(16*115200) = 2.1701 -> IBRD=2, FBRD=11，
+ * 实际波特率 115107，误差 0.08%。 */
 
-#define DBG_CLK_HZ     32000000UL   /* MFPCLK = SYSOSC 32MHz */
+#define DBG_CLK_HZ     4000000UL    /* MFCLK = SYSOSC/8，固定 */
 #define DBG_BAUD       115200UL
-/* divisor = clk/(16*baud) = 17.3611 -> IBRD=17, FBRD=23 */
+/* divisor = clk/(16*baud) = 2.1701 -> IBRD=2, FBRD=11 */
 #define DBG_IBRD       (DBG_CLK_HZ / (16UL * DBG_BAUD))
 #define DBG_FBRD       ((uint32_t)((((DBG_CLK_HZ % (16UL * DBG_BAUD)) * 64UL) \
                         + (8UL * DBG_BAUD)) / (16UL * DBG_BAUD)))
@@ -448,7 +448,7 @@ static void handle_line(char *line)
 void uart_debug_init(void)
 {
     DL_UART_ClockConfig clock_config = {
-        .clockSel    = DL_UART_CLOCK_BUSCLK,
+        .clockSel    = DL_UART_CLOCK_MFCLK,   /* 4MHz 固定，见文件头说明 */
         .divideRatio = DL_UART_CLOCK_DIVIDE_RATIO_1,
     };
     DL_UART_Config uart_config = {
