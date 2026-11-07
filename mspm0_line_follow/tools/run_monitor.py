@@ -63,7 +63,8 @@ def main():
     ap.add_argument("--port", help="COM7 / /dev/ttyUSB0")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--duration", type=float, default=20.0, help="采集秒数")
-    ap.add_argument("--stream", type=int, default=50, help="板端打印周期 ms")
+    ap.add_argument("--stream", type=int, default=100, help="板端打印周期 ms")
+    ap.add_argument("--debug", action="store_true", help="打印收到的原始行")
     ap.add_argument("--base", type=int, help="下发起步基线速度")
     ap.add_argument("--kp", type=int, help="下发 kp(千分)")
     ap.add_argument("--kd", type=int, help="下发 kd(千分)")
@@ -103,35 +104,42 @@ def main():
                                 args.kd if args.kd is not None else 130))
     send("stream %d" % args.stream)
     send("start")
+    ser.reset_input_buffer()
     print("发车！采集 %.0f 秒（Ctrl-C 提前结束）" % args.duration)
 
     rows = []
     cur = None
     start = time.time()
+    rx = b""                      # 累积缓冲：按 \n 切行，避免 timeout 截断
     try:
         while time.time() - start < args.duration:
-            line = ser.readline().decode("ascii", errors="ignore").strip()
-            if not line:
-                continue
-            m = RE_HEAD.search(line)
-            if m:
-                if cur:
-                    rows.append(cur)                 # 上一帧只有头，收尾
-                cur = {
-                    "state": m.group(1), "seq": int(m.group(2)),
-                    "err": int(m.group(3)), "valid": int(m.group(4)),
-                    "mask": int(m.group(5), 16),
-                }
-                continue
-            m = RE_BODY.search(line)
-            if m and cur is not None:
-                cur.update({
-                    "vL": int(m.group(1)), "vR": int(m.group(2)),
-                    "pwmL": int(m.group(3)), "pwmR": int(m.group(4)),
-                    "tgtL": int(m.group(5)), "tgtR": int(m.group(6)),
-                })
-                rows.append(cur)
-                cur = None
+            rx += ser.read(512)
+            while b"\n" in rx:
+                raw, rx = rx.split(b"\n", 1)
+                line = raw.decode("ascii", errors="ignore").strip()
+                if not line:
+                    continue
+                if args.debug and len(rows) < 6:
+                    print("  RAW: %r" % line)
+                m = RE_HEAD.search(line)
+                if m:
+                    if cur:
+                        rows.append(cur)             # 上一帧只有头，收尾
+                    cur = {
+                        "state": m.group(1), "seq": int(m.group(2)),
+                        "err": int(m.group(3)), "valid": int(m.group(4)),
+                        "mask": int(m.group(5), 16),
+                    }
+                    continue
+                m = RE_BODY.search(line)
+                if m and cur is not None:
+                    cur.update({
+                        "vL": int(m.group(1)), "vR": int(m.group(2)),
+                        "pwmL": int(m.group(3)), "pwmR": int(m.group(4)),
+                        "tgtL": int(m.group(5)), "tgtR": int(m.group(6)),
+                    })
+                    rows.append(cur)
+                    cur = None
     except KeyboardInterrupt:
         print("\n提前结束")
         if cur:
