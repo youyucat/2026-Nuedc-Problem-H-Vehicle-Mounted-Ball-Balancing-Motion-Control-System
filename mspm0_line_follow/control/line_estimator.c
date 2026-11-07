@@ -97,11 +97,19 @@ bool line_estimator_compute(const line_frame_t *frame,
                 int32_t cluster_pos =
                     (int32_t)(cluster_weighted / cluster_strength);
 
+                /* 选簇：总黑度最大（2026-11-07 实车全圈数据定稿）。
+                 * 之前用「离上一帧最近」，实测 21 次被弱假簇抢走锁定
+                 * （[1,3] 里选了 ch1），err 在 -142/-714 间横跳 93 次。
+                 * 假簇是干扰弱信号、真线是强信号，黑度权重天然区分；
+                 * 距离仅在权重相同（并列）时作次级判据。 */
                 if (s_have_prev) {
                     int32_t dist = cluster_pos - s_prev_pos;
 
                     if (dist < 0) dist = -dist;
-                    if ((!have_best) || (dist < best_dist)) {
+                    if ((!have_best) ||
+                        (cluster_strength > best_strength) ||
+                        ((cluster_strength == best_strength) &&
+                         (dist < best_dist))) {
                         best_dist = dist;
                         best_weighted = cluster_weighted;
                         best_strength = cluster_strength;
