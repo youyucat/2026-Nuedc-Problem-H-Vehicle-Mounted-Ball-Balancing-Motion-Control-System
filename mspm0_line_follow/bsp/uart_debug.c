@@ -461,6 +461,13 @@ void uart_debug_init(void)
 
     /* PA10 = UART0_TX (PINCM21, PF2)，PA11 = UART0_RX (PINCM22, PF2)。
      * 已核对 bsp/board_profile.h：这两脚未被本工程占用。 */
+    /* 引脚复用：必须把 PINCM21/22 切到 UART0 功能，否则引脚停留在
+     * 普通 IO 状态，TX 信号到不了引脚 —— 上电完全无输出的根因
+     * （2026-11-07 实测）。特意绕开 syscfg 就必须自己配 IOMUX。 */
+    DL_GPIO_initPeripheralOutputFunction(IOMUX_PINCM21,
+                                         IOMUX_PINCM21_PF_UART0_TX);
+    DL_GPIO_initPeripheralInputFunction(IOMUX_PINCM22,
+                                        IOMUX_PINCM22_PF_UART0_RX);
     DL_UART_Main_setClockConfig(UART0, &clock_config);
     DL_UART_Main_init(UART0, &uart_config);
     DL_UART_Main_setOversampling(UART0, DL_UART_OVERSAMPLING_RATE_16X);
