@@ -23,12 +23,17 @@
 #include "hal/hal_time.h"
 #include "services/line_processing.h"
 
-/* ===================== 波特率分频（BUSCLK = 40 MHz） ===================== */
+/* ===================== 波特率分频（UART0 BUSCLK = 80 MHz） ===================== */
+/* UART0 挂 PD0（MCLK 域），BUSCLK = MCLK = 80 MHz，不是 ULPCLK 的 40 MHz！
+ * 之前按 40M 算分频 → 实际波特率 230.4k，115200 终端收到全乱码
+ * （2026-11-07 实测"串口只有空白"的第二个根因）。
+ * SDK 佐证：例程分频宏的命名都标注所在域实际频率
+ * （如 UART_0_IBRD_32_MHZ_115200_BAUD = 17，SYSOSC 32M 域）。 */
 
-#define DBG_CLK_HZ     40000000UL   /* ULPCLK = MCLK(80MHz)/2 */
+#define DBG_CLK_HZ     80000000UL   /* UART0 在 PD0/MCLK 域，SYSPLL 80MHz */
 #define DBG_BAUD       115200UL
-/* divisor = clk/(16*baud) = 21.701 -> IBRD=21, FBRD=round(0.701*64)=45，
- * 实际波特率 115191，误差 0.008%。 */
+/* divisor = clk/(16*baud) = 43.403 -> IBRD=43, FBRD=26，
+ * 实际波特率 115106，误差 0.08%。 */
 #define DBG_IBRD       (DBG_CLK_HZ / (16UL * DBG_BAUD))
 #define DBG_FBRD       ((uint32_t)((((DBG_CLK_HZ % (16UL * DBG_BAUD)) * 64UL) \
                         + (8UL * DBG_BAUD)) / (16UL * DBG_BAUD)))
