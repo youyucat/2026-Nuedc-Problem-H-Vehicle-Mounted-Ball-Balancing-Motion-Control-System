@@ -20,6 +20,7 @@ void line_controller_init(line_controller_t *controller,
     controller->kp_milli = kp_milli;
     controller->kd_milli = kd_milli;
     controller->kdw_milli = LINE_CONTROLLER_KDW_MILLI_DEFAULT;
+    controller->ki_milli = LINE_CONTROLLER_KI_MILLI_DEFAULT;
     controller->p_boost_permille =
         LINE_CONTROLLER_P_BOOST_PERMILLE_DEFAULT;
     controller->previous_error = 0;
@@ -31,6 +32,7 @@ void line_controller_reset(line_controller_t *controller)
     if (controller == NULL) return;
     controller->previous_error = 0;
     controller->has_previous = false;
+    controller->i_acc = 0;
 }
 
 void line_controller_step(line_controller_t *controller,
@@ -61,9 +63,22 @@ void line_controller_step(line_controller_t *controller,
                abs_error / 1000;
     correction = (gain * error +
                   (int32_t)controller->kd_milli * derivative) / 1000 +
-                 ((int32_t)controller->kdw_milli * wheel_diff_mms) / 1000;
+                 ((int32_t)controller->kdw_milli * wheel_diff_mms) / 1000 +
+                 ((int32_t)controller->ki_milli * controller->i_acc) /
+                     1000000;
     *left = clamp_output((int32_t)controller->base_output + correction);
     *right = clamp_output((int32_t)controller->base_output - correction);
     controller->previous_error = error;
     controller->has_previous = true;
+}
+
+void line_controller_integrate(line_controller_t *controller, int16_t error)
+{
+    int32_t limit;
+
+    if ((controller == NULL) || (controller->ki_milli <= 0)) return;
+    limit = LINE_CONTROLLER_I_ACC_LIMIT;
+    controller->i_acc += error;
+    if (controller->i_acc >  limit) controller->i_acc =  limit;
+    if (controller->i_acc < -limit) controller->i_acc = -limit;
 }

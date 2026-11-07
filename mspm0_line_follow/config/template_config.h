@@ -109,7 +109,7 @@
  * 1 => 到 260 mm/s 约 1.3 s，另一颗芯片上的小球不会被甩出去。 */
 #define TEMPLATE_LINE_RAMP_STEP_MM_S_PER_TICK   1
 /* 转弯自适应减速：每 1 mm/s 打角量降低基础速度百分之几（0 = 关闭）。 */
-#define TEMPLATE_LINE_TURN_DECEL_FRACTION       10
+#define TEMPLATE_LINE_TURN_DECEL_FRACTION 10
 #define TEMPLATE_LINE_TURN_MIN_RUN_MM_S         80
 
 #endif

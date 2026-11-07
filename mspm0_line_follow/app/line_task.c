@@ -55,7 +55,9 @@ static uint16_t s_left_motor_trim_permille =
 static uint16_t s_right_motor_trim_permille =
     TEMPLATE_DEFAULT_RIGHT_MOTOR_TRIM_PERMILLE;
 static uint32_t s_last_speed_sequence;
-static bool s_auto_start = true;
+/* 上电默认等待串口 start 指令，不自动起步（2026-11-07 实测要求）。
+ * 串口 stop 会再次关闭自动起步；start 命令即时起步。 */
+static bool s_auto_start = false;
 
 static void clear_motion(void)
 {
@@ -309,6 +311,7 @@ static void running_step(uint32_t now_ms)
             (line_error_in < TEMPLATE_LINE_ERROR_DEADZONE)) {
             line_error_in = 0;
         }
+        line_controller_integrate(&s_controller, line_error_in);
         line_controller_step(&s_controller, line_error_in,
                              (int16_t)(speed.right_speed_mm_s -
                                        speed.left_speed_mm_s),

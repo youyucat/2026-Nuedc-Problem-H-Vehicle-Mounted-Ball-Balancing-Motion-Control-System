@@ -19,12 +19,25 @@
 #define LINE_CONTROLLER_KDW_MILLI_DEFAULT 500
 #endif
 
+/* 转向积分：仿真否决（ki 300/600/1000 弯道全线恶化——100ms 执行滞后下
+ * I 建立过程中车已冲出，出弯残留反致过冲），默认 0，机制保留。
+ * 长窗差分 D 同样被仿真否决（50ms 窗 arc500 82.7→137mm，滞后主导的
+ * 系统里任何"超前量"都会吃掉稳定裕度）。入弯脱线的正解是弯道降速。 */
+#ifndef LINE_CONTROLLER_KI_MILLI_DEFAULT
+#define LINE_CONTROLLER_KI_MILLI_DEFAULT 0
+#endif
+#ifndef LINE_CONTROLLER_I_ACC_LIMIT
+#define LINE_CONTROLLER_I_ACC_LIMIT 300000
+#endif
+
 typedef struct {
     int16_t base_output;
     int16_t kp_milli;
     int16_t kd_milli;
     int16_t p_boost_permille;   /* 非线性 P 增益爬升系数（千分比） */
     int16_t kdw_milli;          /* 轮速差阻尼增益（千分比） */
+    int16_t ki_milli;           /* 转向积分增益（千分比） */
+    int32_t i_acc;              /* 误差积分累加（拍单位） */
     int16_t previous_error;
     bool has_previous;
 } line_controller_t;
@@ -39,5 +52,7 @@ void line_controller_step(line_controller_t *controller,
                           int16_t wheel_diff_mms,
                           int16_t *left,
                           int16_t *right);
+/* 转向积分累加（每控制拍调用一次，仅在线有效时累加） */
+void line_controller_integrate(line_controller_t *controller, int16_t error);
 
 #endif
