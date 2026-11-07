@@ -26,49 +26,109 @@ static uint32_t neighborhood_filter(uint32_t mask, uint8_t count)
     return (filtered != 0U) ? filtered : mask;
 }
 
+/* 上一帧质心（像素单位），用于簇选择：线是连续移动的，与上一帧
+ * 位置差得远的簇几乎必然是干扰假簇。 */
+static bool     s_have_prev;
+static int32_t  s_prev_pos;
+
 bool line_estimator_compute(const line_frame_t *frame,
                             const int16_t *positions,
                             int16_t *error)
 {
-    int64_t weighted = 0;
-    uint32_t strength = 0U;
-    uint32_t mask;
     int32_t maximum_position = 0;
+    uint32_t mask;
+    uint8_t i;
 
     if ((frame == NULL) || (positions == NULL) || (error == NULL) ||
         frame->sensor_error || (frame->active_mask == 0U)) {
         return false;
     }
-    mask = neighborhood_filter(frame->active_mask, frame->channel_count);
-    for (uint8_t i = 0U; i < frame->channel_count; ++i) {
+    for (i = 0U; i < frame->channel_count; ++i) {
         int32_t absolute_position = positions[i];
-        uint32_t bit = (uint32_t)1U << i;
-        uint16_t value;
 
         if (absolute_position < 0) absolute_position = -absolute_position;
         if (absolute_position > maximum_position) {
             maximum_position = absolute_position;
         }
-        value = frame->normalized[i];
-        /* 假黑清零：判了黑（active_mask）但被邻域一致性剔除的通道，
-         * 是车体晃动/干扰引起的误判，不许参与质心。 */
-        if (((frame->active_mask & bit) != 0U) && ((mask & bit) == 0U)) {
-            continue;
-        }
-        /* 亚像素插值：不再要求「已判黑」。线压在两个探头之间时，两路
-         * 都有中间黑度，用连续值加权才能得到连续误差；原实现只取二值
-         * mask，误差只能落在 8 个离散台阶上（实测 err 全是 143 的倍数），
-         * PD 在每个台阶跳变处都踢一次 → 0.8Hz 摆头。
-         * NORM_MIN 挡掉白底噪声（白底 normalized≈0，噪声折算约 ±140）。 */
-        if (value < 300U) continue;
-        weighted += (int64_t)positions[i] * value;
-        strength += value;
     }
-    if ((strength == 0U) || (maximum_position == 0)) return false;
-    weighted /= strength;
-    weighted = weighted * 1000 / maximum_position;
-    if (weighted > 1000) weighted = 1000;
-    if (weighted < -1000) weighted = -1000;
-    *error = (int16_t)weighted;
+    if (maximum_position == 0) return false;
+
+    mask = neighborhood_filter(frame->active_mask, frame->channel_count);
+
+    /* ---- 分簇质心（2026-11-07 实车第二轮数据）----
+     * 邻域过滤只能删孤立点，删不掉「整簇假黑」：实测丢线前
+     * mask 在 [3,4,5]（真线）与 [1,4,5,6]、[1,2,4,5]（真线+远处
+     * 假簇，中间隔 2~3 个白通道）之间跳变。两簇一起算质心会把
+     * 误差拉向两簇中间（err 66→129 跳变），转向被带歪，车滑出线。
+     *
+     * 规则：mask 切成连续簇，每簇独立算加权质心与总黑度；
+     * 有上一帧位置时选「离上一帧最近」的簇（线不会瞬移），
+     * 没有历史（上电第一帧）选总黑度最大的簇。 */
+    {
+        int64_t best_weighted = 0;
+        uint32_t best_strength = 0U;
+        int32_t best_dist = 0;
+        bool have_best = false;
+        uint8_t count = frame->channel_count;
+
+        i = 0U;
+        while (i < count) {
+            uint8_t j;
+            int64_t cluster_weighted = 0;
+            uint32_t cluster_strength = 0U;
+
+            if ((mask & ((uint32_t)1U << i)) == 0U) {
+                ++i;
+                continue;
+            }
+            j = i;
+            while ((j < count) && ((mask & ((uint32_t)1U << j)) != 0U)) {
+                uint16_t value = frame->normalized[j];
+
+                /* 亚像素插值：normalized 是连续黑度，阈值 300 挡白底
+                 * 噪声（白底 normalized≈0、噪声折算约 ±140）。 */
+                if (value >= 300U) {
+                    cluster_weighted += (int64_t)positions[j] * value;
+                    cluster_strength += value;
+                }
+                ++j;
+            }
+            if (cluster_strength > 0U) {
+                int32_t cluster_pos =
+                    (int32_t)(cluster_weighted / cluster_strength);
+
+                if (s_have_prev) {
+                    int32_t dist = cluster_pos - s_prev_pos;
+
+                    if (dist < 0) dist = -dist;
+                    if ((!have_best) || (dist < best_dist)) {
+                        best_dist = dist;
+                        best_weighted = cluster_weighted;
+                        best_strength = cluster_strength;
+                        have_best = true;
+                    }
+                } else {
+                    if ((!have_best) ||
+                        (cluster_strength > best_strength)) {
+                        best_weighted = cluster_weighted;
+                        best_strength = cluster_strength;
+                        have_best = true;
+                    }
+                }
+            }
+            i = j;
+        }
+
+        if (!have_best) return false;
+        s_prev_pos = (int32_t)(best_weighted / best_strength);
+        s_have_prev = true;
+        {
+            int64_t out = s_prev_pos * 1000 / maximum_position;
+
+            if (out > 1000) out = 1000;
+            if (out < -1000) out = -1000;
+            *error = (int16_t)out;
+        }
+    }
     return true;
 }
