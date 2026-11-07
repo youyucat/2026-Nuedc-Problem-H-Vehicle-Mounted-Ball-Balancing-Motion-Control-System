@@ -94,6 +94,51 @@ class Collector(threading.Thread):
             return len(self.frames)
 
 
+class SimCollector(threading.Thread):
+    """合成数据源：直道(8s)→弯道(8s, err 大)→丢线(3s) 循环。
+    用于无串口验证全链路（线程/窗口/CSV/决策/下发）。"""
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.frames = []
+        self.lock = threading.Lock()
+        self.running = True
+        self.rx_garbage = 0
+        self.seq = 0
+
+    def run(self):
+        t0 = time.time()
+        while self.running:
+            t = time.time() - t0
+            phase = t % 19.0
+            seq = int(t / 0.1)
+            if seq == self.seq:
+                time.sleep(0.02)
+                continue
+            self.seq = seq
+            if phase > 16.0:
+                f = {"err": 0, "valid": 0, "mask": 0}
+            elif phase > 8.0:
+                f = {"err": 520 + int(60 * math.sin(t * 3)),
+                     "valid": 1, "mask": 0x60}
+            else:
+                f = {"err": int(120 * math.sin(t * 2.5)),
+                     "valid": 1, "mask": 0x18}
+            f.update({"t": time.time(), "state": "RUN", "seq": seq,
+                      "vL": 200, "vR": 190})
+            with self.lock:
+                self.frames.append(f)
+            time.sleep(0.05)
+
+    def snapshot_since(self, t_start):
+        with self.lock:
+            return [f for f in self.frames if f["t"] >= t_start]
+
+    def total(self):
+        with self.lock:
+            return len(self.frames)
+
+
 def analyze(frames, window_s):
     """窗口指标：有效帧误差统计 + 丢线时长。"""
     valid = [f for f in frames if f["valid"] == 1]
@@ -159,7 +204,7 @@ def save_segment(outdir, idx, frames):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", required=True)
+    ap.add_argument("--port", help="COM9 等（--simulate 时可省）")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--session", type=float, default=300,
                     help="总会话秒数（车持续跑）")
@@ -169,30 +214,49 @@ def main():
     ap.add_argument("--kp", type=int, default=120)
     ap.add_argument("--kd", type=int, default=130)
     ap.add_argument("--outdir", default="tools/runs/session")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="不发 start（车原地不动），其余链路照走")
+    ap.add_argument("--simulate", action="store_true",
+                    help="合成数据源（不需要串口），测全链路逻辑")
     args = ap.parse_args()
 
+    if (not args.simulate) and (not args.port):
+        ap.error("--simulate 之外必须给 --port")
     os.makedirs(args.outdir, exist_ok=True)
-    ser = serial.Serial(args.port, args.baud, timeout=0.15)
-    time.sleep(0.5)
-    ser.reset_input_buffer()
+    sent_log = []
+    if args.simulate:
+        ser = None
 
-    def send(cmd):
-        ser.write((cmd + "\n").encode("ascii"))
-        ser.flush()
-        time.sleep(0.1)
+        def send(cmd):
+            sent_log.append((time.time(), cmd))
+            print("  [下发] %s" % cmd)
+    else:
+        ser = serial.Serial(args.port, args.baud, timeout=0.15)
+        time.sleep(0.5)
+        ser.reset_input_buffer()
+
+        def send(cmd):
+            ser.write((cmd + "\n").encode("ascii"))
+            ser.flush()
+            time.sleep(0.1)
 
     print("== 调参会话 %.0fs / 窗口 %.0fs ==" % (args.session, args.window))
     print("初始 gain: base=%d kp=%d kd=%d" % (args.base, args.kp, args.kd))
     send("gain %d %d %d" % (args.base, args.kp, args.kd))
     send("stream 100")
 
-    collector = Collector(ser)
+    if args.simulate:
+        collector = SimCollector()
+    else:
+        collector = Collector(ser)
     collector.start()
 
-    send("start")
+    if not args.dry_run:
+        send("start")
     t0 = time.time()
-    print("发车！车持续跑 %.0f 秒，每 %.0f 秒分析一次\n"
-          % (args.session, args.window))
+    print("%s！持续 %.0f 秒，每 %.0f 秒分析一次\n"
+          % ("发车" if not args.dry_run else "干跑（不发 start）",
+             args.session, args.window))
 
     kp = args.kp
     kp_history = [(0.0, kp)]
@@ -252,7 +316,8 @@ def main():
         time.sleep(0.3)
         collector.running = False
         collector.join(timeout=1.0)
-        ser.close()
+        if ser is not None:
+            ser.close()
 
     print("\n== 会话结束（%s）==" % ("紧急停车" if aborted else "正常"))
     print("kp 轨迹: " + " → ".join(
