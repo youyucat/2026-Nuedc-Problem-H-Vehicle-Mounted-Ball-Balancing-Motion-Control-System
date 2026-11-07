@@ -28,6 +28,7 @@ typedef struct {
     double pitch_mm;          /* 相邻探头间距（8 路，中心对称） */
     double line_half_mm;      /* 黑线半宽 */
     double v_max_mm_s;        /* 满占空比轮速 */
+    double dead_frac;         /* PWM 死区（占空比分数，实测 0.007） */
     double motor_tau_ms;      /* 电机一阶滞后 */
     double noise;             /* 灰度读数噪声（ADC 量化近似） */
     double gain_left;         /* 左轮增益（1.0 = 标称；实车左右电机/减速箱不等） */

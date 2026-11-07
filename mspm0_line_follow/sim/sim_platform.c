@@ -35,16 +35,24 @@ sim_params_t g_sim = {
     60.0,     /* sensor_fwd_mm */
     10.0,     /* pitch_mm（8 路 ±35mm 覆盖，与 ±3500 位置图一致） */
     12.0,     /* line_half_mm */
-    800.0,    /* v_max_mm_s */
-    100.0,    /* motor_tau_ms */
+    /* ---- 以下 5 项 2026-11-07 由实车 open 阶跃实测（150..1000 六档）----
+     * 拟合 v = k*(pwm - pwm0)：左 k=0.6213/pwm0=7、右 k=0.6147/pwm0=-15，
+     * 满速 617/624mm/s，tau 80~95ms。
+     * 旧值（800mm/s、死区 15%、tau 100）与实车差得多：满速高估 30%，
+     * 死区高估 20 倍 —— 仿真的速度环整定因此失真。 */
+    617.0,    /* v_max_mm_s：pwm=1000 实测 617mm/s（原 800） */
+    0.007,    /* dead_frac：实测死区 0.7%（原 0.15） */
+    90.0,     /* motor_tau_ms：实测 63% 上升 80~95ms（原 100） */
     15.0,     /* noise */
-    1.0,      /* gain_left：实车可扫 0.95~1.05 */
-    1.0,      /* gain_right */
-    0.88,     /* turn_eff：差速只有 88% 变成真实转角（侧滑/间隙） */
+    1.0,      /* gain_left */
+    1.011,    /* gain_right：右轮 624/617 略快 1.1% */
+    0.88,     /* turn_eff */
     42U
 };
 
 sim_car_t g_car;
+
+
 
 static uint32_t s_now_ms;
 static int32_t  s_enc_delta_l, s_enc_delta_r;
@@ -82,9 +90,10 @@ void sim_reset(double x, double y, double th)
 
 static double pwm_to_speed(int16_t pwm)
 {
-    /* 死区 + 线性：起转约 15% 占空比（对应 SPEED_PI_MIN_OUTPUT 的量级） */
+    /* 死区 + 线性。死区实测仅 0.7%（pwm=150 已有 81mm/s），
+     * 旧值 15% 是错的：它让仿真里小 PWM 完全不转，速度环行为失真。 */
     double frac = (double)pwm / 1000.0;
-    const double dead = 0.15;
+    const double dead = g_sim.dead_frac;
     if (fabs(frac) < dead) return 0.0;
     frac = (frac > 0.0) ? (frac - dead) / (1.0 - dead)
                         : (frac + dead) / (1.0 - dead);

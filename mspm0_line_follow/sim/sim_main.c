@@ -80,8 +80,8 @@ static void run_scene(const scene_t *sc, int16_t kp, int16_t kd,
     uint32_t now;
     line_task_snapshot_t snap;
 
-    g_sim.motor_tau_ms = tau;
-    g_sim.v_max_mm_s = vmax;
+    if (tau  > 0.0) g_sim.motor_tau_ms = tau;
+    if (vmax > 0.0) g_sim.v_max_mm_s  = vmax;
     memset(out, 0, sizeof(*out));
 
     track_set(&sc->seg, 1);
@@ -177,7 +177,7 @@ int main(int argc, char **argv)
     int16_t kp = TEMPLATE_DEFAULT_KP_MILLI;
     int16_t kd = TEMPLATE_DEFAULT_KD_MILLI;
     int16_t base = TEMPLATE_DEFAULT_BASE_OUTPUT;
-    double tau = 100.0, vmax = 800.0;
+    double tau = -1.0, vmax = -1.0;   /* <0 = 用 g_sim 里的实车实测默认 */
 
     int i;
     if (argc > 1) scene = atoi(argv[1]);
