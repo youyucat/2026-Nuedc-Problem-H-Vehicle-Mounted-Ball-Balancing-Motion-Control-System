@@ -30,12 +30,14 @@ SOURCES := \
     app/line_task.c \
     bsp/board.c \
     bsp/hal_system_mspm0.c \
+    bsp/hal_uart_mspm0.c \
     bsp/uart_debug.c \
     control/line_controller.c \
     control/line_estimator.c \
     drivers/motor_tb6612.c \
     drivers/encoder_speed.c \
     drivers/line_sensor_mux_adc.c \
+    drivers/uart_async.c \
     services/line_processing.c
 
 HEADERS := $(wildcard app/*.h bsp/*.h config/*.h control/*.h drivers/*.h hal/*.h services/*.h)

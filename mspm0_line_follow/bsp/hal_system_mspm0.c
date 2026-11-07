@@ -6,11 +6,11 @@
  * MSPM0G3507 implementation of the hal_system interface（循迹专用工程）.
  *
  * hal_system_bringup() owns the SysConfig-generated power/clock/peripheral
- * initializers. 本工程只生成 SYSCTL（80 MHz 时钟树）、ADC0（灰度 MUX 输出）
- * 和 SysTick 三块，因此这里也只调用这三个 init：
- *   - 源工程里的 UART0/UART_VISION RX 上拉、I2C1 SDA/SCL 上拉与
- *     SYSCFG_DL_UART_*_init()/SYSCFG_DL_I2C_1_init()/SYSCFG_DL_DMA_init()
- *     全部删除（对应外设已从 .syscfg 移除，生成代码里也不再有这些函数）。
+ * initializers. 本工程生成 SYSCTL（80 MHz 时钟树）、ADC0（灰度 MUX 输出）、
+ * UART0（调试串口 PA10/PA11 115200）和 SysTick 四块。
+ *   - UART0 由 SysConfig 配置（时钟 MFPCLK 32MHz 自动推导分频 + 引脚复用），
+ *     2026-11-07 手写 UART 初始化反复踩波特率坑后改为生成代码接管。
+ *   - 源工程里的 UART_VISION / I2C1 / DMA init 依旧删除（对应外设不在本工程）。
  *   - SYSCFG_DL_SYSCTL_CLK_init() 与源工程一样**不调用**：上游 bringup 只靠
  *     SYSCFG_DL_SYSCTL_init() 完成时钟树配置，多调一行会改变启动时序。
  */
@@ -21,6 +21,7 @@ void hal_system_bringup(void)
     SYSCFG_DL_GPIO_init();
     SYSCFG_DL_SYSCTL_init();
     SYSCFG_DL_ADC_0_init();
+    SYSCFG_DL_UART_0_init();
     SYSCFG_DL_SYSTICK_init();
 }
 

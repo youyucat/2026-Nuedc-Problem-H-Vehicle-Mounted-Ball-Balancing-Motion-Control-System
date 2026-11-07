@@ -1,5 +1,5 @@
 /*
- * 串口调试模块：UART0 手写 DriverLib 初始化 + 行命令解析。
+ * 串口调试模块：行命令解析 + 灰度校准。
  *
  * 为什么不用 SysConfig 实例：本工程约定外设手写集中在 bsp/（TB6612 的
  * TIMA1 就是这么做的），.syscfg 只保留 SYSCTL/ADC/SysTick，避免
@@ -21,42 +21,16 @@
 #include "app/line_task.h"
 #include "config/template_config.h"
 #include "hal/hal_time.h"
+#include "hal/hal_uart.h"
+#include "drivers/uart_async.h"
 #include "services/line_processing.h"
 
-/* ===================== 波特率分频（时钟源 = MFCLK，固定 4 MHz） ===================== */
-/* BUSCLK/MFPCLK 路径连续两版分频假设（40M/80M/32M）实测全乱码，
- * 不再赌时钟树推导 —— CLKSEL 直接选 MFCLK：硬件固定 SYSOSC/8 = 4MHz，
- * 与 power domain、时钟树门控完全无关，频率 100% 确定。
- * 4MHz ≥ 16×115200 = 1.8443 MHz，满足 16X 过采样要求。
- * divisor = 4M/(16*115200) = 2.1701 -> IBRD=2, FBRD=11，
- * 实际波特率 115107，误差 0.08%。 */
+/* ===================== 状态 ===================== */
 
-#define DBG_CLK_HZ     4000000UL    /* MFCLK = SYSOSC/8，固定 */
-#define DBG_BAUD       115200UL
-/* divisor = clk/(16*baud) = 2.1701 -> IBRD=2, FBRD=11 */
-#define DBG_IBRD       (DBG_CLK_HZ / (16UL * DBG_BAUD))
-#define DBG_FBRD       ((uint32_t)((((DBG_CLK_HZ % (16UL * DBG_BAUD)) * 64UL) \
-                        + (8UL * DBG_BAUD)) / (16UL * DBG_BAUD)))
+#define RX_LINE_MAX  96U
 
-/* ===================== 发送：环形缓冲 + TX 中断 ===================== */
-
-#define TX_BUF_SIZE  256U   /* 2 的幂，配合 & (SIZE-1) 取模 */
-_Static_assert((TX_BUF_SIZE & (TX_BUF_SIZE - 1U)) == 0U,
-               "TX buffer size must be a power of two");
-
-static volatile uint8_t  s_tx_buf[TX_BUF_SIZE];
-static volatile uint16_t s_tx_head;      /* 写入位置 */
-static volatile uint16_t s_tx_tail;      /* 发送位置 */
-static volatile bool     s_tx_active;   /* TX 中断驱动中 */
-
-/* ===================== 接收：主循环轮询 + 行缓冲 ===================== */
-
-#define RX_LINE_MAX  48U
-
-static char    s_rx_line[RX_LINE_MAX];
-static uint8_t s_rx_len;
-
-/* ===================== 周期打印 / 校准采样状态 ===================== */
+static char     s_rx_line[RX_LINE_MAX];
+static uint8_t  s_rx_len;
 
 static uint32_t s_stream_period_ms;      /* 0 = 关闭周期 stat */
 static uint32_t s_stream_last_ms;
@@ -71,42 +45,15 @@ static uint16_t s_cal_black[TEMPLATE_SENSOR_MAX_CHANNELS];
 static bool     s_have_white;
 static bool     s_have_black;
 
-/* ===================== 底层收发 ===================== */
-
-static void tx_start(void)
-{
-    if (s_tx_active) return;
-    if (s_tx_head == s_tx_tail) return;
-    s_tx_active = true;
-    /* 先送一个字节再开中断：TXIFG 因 FIFO 空置位，使能后立即进中断续发 */
-    DL_UART_transmitData(UART0, s_tx_buf[s_tx_tail]);
-    s_tx_tail = (uint16_t)((s_tx_tail + 1U) & (TX_BUF_SIZE - 1U));
-    DL_UART_enableInterrupt(UART0, DL_UART_INTERRUPT_TX);
-}
-
-void UART0_IRQHandler(void)
-{
-    if (DL_UART_getPendingInterrupt(UART0) == DL_UART_IIDX_TX) {
-        if (s_tx_head != s_tx_tail) {
-            DL_UART_transmitData(UART0, s_tx_buf[s_tx_tail]);
-            s_tx_tail = (uint16_t)((s_tx_tail + 1U) & (TX_BUF_SIZE - 1U));
-        } else {
-            DL_UART_disableInterrupt(UART0, DL_UART_INTERRUPT_TX);
-            s_tx_active = false;
-        }
-    }
-}
+/* ===================== 底层收发（uart_async：原版验证模块） =====================
+ * 时钟、波特率、引脚复用全部由 SysConfig 生成（SYSCFG_DL_UART_0_init），
+ * TX 走 uart_async 的 1024B 环缓 + TX 空中断，RX 环缓由 HAL ISR 填充。
+ * 2026-11-07：手写 UART 初始化三版分频全错后，整体换回原版模块。 */
 
 static void dbg_write(const char *text)
 {
     if (text == NULL) return;
-    while (*text != '\0') {
-        uint16_t next = (uint16_t)((s_tx_head + 1U) & (TX_BUF_SIZE - 1U));
-        if (next == s_tx_tail) break;        /* 缓冲满：丢弃（不阻塞控制拍） */
-        s_tx_buf[s_tx_head] = (uint8_t)*text++;
-        s_tx_head = next;
-    }
-    tx_start();
+    (void)uart_async_write(text, (uint16_t)strlen(text));
 }
 
 /* 整数版 printf：只用 %d/%u/%s/%x（不带 l/h 修饰）。
@@ -447,45 +394,10 @@ static void handle_line(char *line)
 
 void uart_debug_init(void)
 {
-    DL_UART_ClockConfig clock_config = {
-        .clockSel    = DL_UART_CLOCK_MFCLK,   /* 4MHz 固定，见文件头说明 */
-        .divideRatio = DL_UART_CLOCK_DIVIDE_RATIO_1,
-    };
-    DL_UART_Config uart_config = {
-        .mode        = DL_UART_MODE_NORMAL,
-        .direction   = DL_UART_DIRECTION_TX_RX,
-        .flowControl = DL_UART_FLOW_CONTROL_NONE,
-        .parity      = DL_UART_PARITY_NONE,
-        .wordLength  = DL_UART_WORD_LENGTH_8_BITS,
-        .stopBits    = DL_UART_STOP_BITS_ONE,
-    };
-
-    DL_UART_Main_reset(UART0);
-    DL_UART_Main_enablePower(UART0);
-    hal_time_delay_us(16U);                       /* 上电位稳定（惯例） */
-
-    /* PA10 = UART0_TX (PINCM21, PF2)，PA11 = UART0_RX (PINCM22, PF2)。
-     * 已核对 bsp/board_profile.h：这两脚未被本工程占用。 */
-    /* 引脚复用：必须把 PINCM21/22 切到 UART0 功能，否则引脚停留在
-     * 普通 IO 状态，TX 信号到不了引脚 —— 上电完全无输出的根因
-     * （2026-11-07 实测）。特意绕开 syscfg 就必须自己配 IOMUX。 */
-    DL_GPIO_initPeripheralOutputFunction(IOMUX_PINCM21,
-                                         IOMUX_PINCM21_PF_UART0_TX);
-    DL_GPIO_initPeripheralInputFunction(IOMUX_PINCM22,
-                                        IOMUX_PINCM22_PF_UART0_RX);
-    DL_UART_Main_setClockConfig(UART0, &clock_config);
-    DL_UART_Main_init(UART0, &uart_config);
-    DL_UART_Main_setOversampling(UART0, DL_UART_OVERSAMPLING_RATE_16X);
-    DL_UART_Main_setBaudRateDivisor(UART0, DBG_IBRD, DBG_FBRD);
-    DL_UART_Main_setTXFIFOThreshold(UART0,
-        DL_UART_TX_FIFO_LEVEL_3_4_EMPTY);
-    DL_UART_Main_setRXFIFOThreshold(UART0,
-        DL_UART_RX_FIFO_LEVEL_1_2_FULL);
-    DL_UART_Main_enableFIFOs(UART0);
-    DL_UART_Main_enable(UART0);
-    DL_UART_Main_clearInterruptStatus(UART0,
-        DL_UART_INTERRUPT_TX | DL_UART_INTERRUPT_RX);
-    NVIC_EnableIRQ(UART0_INT_IRQn);
+    /* UART0 的时钟/波特率/引脚复用全部由 SysConfig 生成
+     * （SYSCFG_DL_UART_0_init，在 hal_system_bringup 里调用）。
+     * 这里只挂收发的环形缓冲与中断。 */
+    uart_async_init();
 
     dbg_write("\r\n=== line_follow mspm0 debug ===\r\n"
               "type help. live data: stream 200\r\n");
@@ -500,24 +412,26 @@ void uart_debug_poll(void)
         cal_sample_step();
     }
 
-    /* ---- 2. 接收：轮询 RX FIFO ---- */
-    while (!DL_UART_isRXFIFOEmpty(UART0)) {
-        char c = (char)DL_UART_receiveData(UART0);
-        if (c == '\r' || c == '\n') {
-            if (s_rx_len > 0U) {
-                s_rx_line[s_rx_len] = '\0';
-                handle_line(s_rx_line);
-                s_rx_len = 0U;
-            }
-        } else if (s_rx_len < (RX_LINE_MAX - 1U)) {
-            /* 简单行编辑：退格删一个字符 */
-            if (c == '\b') {
-                if (s_rx_len > 0U) --s_rx_len;
+    /* ---- 2. 接收：从 uart_async 环读取（RX 由 HAL 中断填充） ---- */
+    {
+        char c;
+        while (uart_async_read(&c)) {
+            if (c == '\r' || c == '\n') {
+                if (s_rx_len > 0U) {
+                    s_rx_line[s_rx_len] = '\0';
+                    handle_line(s_rx_line);
+                    s_rx_len = 0U;
+                }
+            } else if (s_rx_len < (RX_LINE_MAX - 1U)) {
+                /* 简单行编辑：退格删一个字符 */
+                if (c == '\b') {
+                    if (s_rx_len > 0U) --s_rx_len;
+                } else {
+                    s_rx_line[s_rx_len++] = c;
+                }
             } else {
-                s_rx_line[s_rx_len++] = c;
+                s_rx_len = 0U;                        /* 超长：整行丢弃 */
             }
-        } else {
-            s_rx_len = 0U;                        /* 超长：整行丢弃 */
         }
     }
 

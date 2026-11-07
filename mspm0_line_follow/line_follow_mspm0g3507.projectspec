@@ -71,12 +71,14 @@
         <file path="app/line_task.c" openOnCreation="false" excludeFromBuild="false"/>
         <file path="bsp/board.c" openOnCreation="false" excludeFromBuild="false"/>
         <file path="bsp/hal_system_mspm0.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="bsp/hal_uart_mspm0.c" openOnCreation="false" excludeFromBuild="false"/>
         <file path="bsp/uart_debug.c" openOnCreation="false" excludeFromBuild="false"/>
         <file path="control/line_controller.c" openOnCreation="false" excludeFromBuild="false"/>
         <file path="control/line_estimator.c" openOnCreation="false" excludeFromBuild="false"/>
         <file path="drivers/motor_tb6612.c" openOnCreation="false" excludeFromBuild="false"/>
         <file path="drivers/encoder_speed.c" openOnCreation="false" excludeFromBuild="false"/>
         <file path="drivers/line_sensor_mux_adc.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="drivers/uart_async.c" openOnCreation="false" excludeFromBuild="false"/>
         <file path="services/line_processing.c" openOnCreation="false" excludeFromBuild="false"/>
 
         <!-- SysConfig 配置 -->

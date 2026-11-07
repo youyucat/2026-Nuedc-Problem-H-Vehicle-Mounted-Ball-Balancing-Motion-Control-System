@@ -23,6 +23,8 @@ const SYSCTL  = scripting.addModule("/ti/driverlib/SYSCTL");
 const SYSTICK = scripting.addModule("/ti/driverlib/SYSTICK");
 const ADC12   = scripting.addModule("/ti/driverlib/ADC12", {}, false);
 const ADC0    = ADC12.addInstance();
+const UART    = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART0   = UART.addInstance();
 const ProjectConfig = scripting.addModule("/ti/project_config/ProjectConfig");
 
 /**
@@ -72,16 +74,10 @@ mux3.inputSelect = "EXCLKMUX_PLLCLK1_OUT";
 const mux8       = system.clockTree["HSCLKMUX"];
 mux8.inputSelect = "HSCLKMUX_SYSPLL2X";
 
+/* 与原版 empty 工程的时钟树属性保持完全一致：
+ * 多出来的 SYSCTL.* 显式属性会让 SysConfig 对 UART 时钟推导
+ * 偏离已验证结果（40M vs 32M 基数，2026-11-07 实测）。 */
 SYSCTL.MCLKSource        = "HSCLK";
-SYSCTL.EXCLKSource       = "SYSPLLOUT1";
-SYSCTL.SYSPLL_CLK1En     = true;
-SYSCTL.enableEXCLK       = true;
-SYSCTL.SYSPLL_CLK2XEn    = true;
-SYSCTL.SYSPLL_CLK2XDiv   = 1;
-SYSCTL.HSCLKSource       = "SYSPLLCLK2X";
-SYSCTL.validateClkStatus = true;
-SYSCTL.SYSPLL_Qdiv       = 5;
-SYSCTL.forceDefaultClkConfig = true;
 SYSCTL.clockTreeEn        = true;
 
 /* SysTick 1 ms tick at 80 MHz -> hal_time_millis(). */
@@ -112,3 +108,14 @@ Board.peripheral.swclkPin.$suggestSolution = "PA20";
 Board.peripheral.swdioPin.$suggestSolution = "PA19";
 ADC0.peripheral.$suggestSolution           = "ADC0";
 ADC0.peripheral.adcPin0.$suggestSolution   = "PA27";
+
+/* --- 调试串口 UART0（PA10 TX / PA11 RX，115200）---
+ * 2026-11-07：由 SysConfig 接管时钟与引脚（此前手写初始化反复踩
+ * 波特率/复用坑）。UART 功能时钟走 MFPCLK（SYSOSC 32MHz），
+ * SysConfig 自动推导 IBRD/FBRD 并生成 SYSCFG_DL_UART_0_init()。
+ * 上层见 hal/hal_uart.h + drivers/uart_async.c（移植自原版工程）。 */
+UART0.$name                    = "UART_0";
+UART0.targetBaudRate           = 115200;
+UART0.peripheral.$assign       = "UART0";
+UART0.peripheral.txPin.$assign = "PA10";
+UART0.peripheral.rxPin.$assign = "PA11";
