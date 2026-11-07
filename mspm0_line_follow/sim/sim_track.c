@@ -1,3 +1,8 @@
+/* 本文件仅用于 PC 仿真（gcc 构建）。目标芯片构建（tiarmclang 经
+ * device.opt 定义 __MSPM0G3507__）中整体排除——CCS 自动源码发现会把
+ * sim 目录拉进固件构建，mock 符号会与真实驱动重定义（2026-11-07 链接
+ * 错误 #10056 的修复）。makefile 的固件构建不含本目录，不受影响。 */
+#ifndef __MSPM0G3507__
 #include "sim_track.h"
 
 #include <math.h>
@@ -128,3 +133,5 @@ double track_progress(double x, double y)
     }
     return prog;
 }
+
+#endif /* __MSPM0G3507__ */
