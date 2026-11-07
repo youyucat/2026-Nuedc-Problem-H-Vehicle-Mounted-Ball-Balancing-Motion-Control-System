@@ -476,7 +476,7 @@ void uart_debug_init(void)
     NVIC_EnableIRQ(UART0_INT_IRQn);
 
     dbg_write("\r\n=== line_follow mspm0 debug ===\r\n"
-              "type help\r\n");
+              "type help. live data: stream 200\r\n");
 }
 
 void uart_debug_poll(void)
