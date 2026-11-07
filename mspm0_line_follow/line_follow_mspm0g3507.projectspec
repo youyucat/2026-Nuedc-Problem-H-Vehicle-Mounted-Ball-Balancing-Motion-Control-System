@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CCS 工程描述：在 CCS 中 File → Import → CCS Project（选本文件）导入。
+     参照 SDK empty_LP_MSPM0G3507_nortos_ticlang.projectspec 适配本工程分层结构。
+     命令行构建仍走 makefile（两者产物互不干扰：CCS 用 Debug/ 下 managed 输出，
+     makefile 用 Debug/syscfg_build/）。 -->
+<projectSpec>
+    <applicability>
+        <when>
+            <context
+                deviceFamily="ARM"
+                deviceId="MSPM0G3507"
+            />
+        </when>
+    </applicability>
+
+    <project
+        title="line_follow"
+        name="line_follow_mspm0g3507"
+        configurations="Debug"
+        toolChain="TICLANG"
+        connection="TIXDS110_Connection.xml"
+        device="MSPM0G3507"
+        ignoreDefaultDeviceSettings="true"
+        ignoreDefaultCCSSettings="true"
+        products="MSPM0-SDK;sysconfig"
+        compilerBuildOptions="
+            -I${PROJECT_ROOT}
+            -I${PROJECT_ROOT}/app
+            -I${PROJECT_ROOT}/bsp
+            -I${PROJECT_ROOT}/config
+            -I${PROJECT_ROOT}/control
+            -I${PROJECT_ROOT}/drivers
+            -I${PROJECT_ROOT}/hal
+            -I${PROJECT_ROOT}/services
+            -I${PROJECT_ROOT}/${ConfigName}
+            -O2
+            @device.opt
+            -I${COM_TI_MSPM0_SDK_INSTALL_DIR}/source/third_party/CMSIS/Core/Include
+            -I${COM_TI_MSPM0_SDK_INSTALL_DIR}/source
+            -mcpu=cortex-m0plus
+            -march=thumbv6m
+            -mfloat-abi=soft
+            -mthumb
+            -Wall
+            -Wextra
+        "
+        linkerBuildOptions="
+            -ldevice.cmd.genlibs
+            -L${COM_TI_MSPM0_SDK_INSTALL_DIR}/source
+            -L${PROJECT_ROOT}
+            -L${PROJECT_BUILD_DIR}/syscfg
+            -Wl,--rom_model
+            -Wl,--warn_sections
+            -Wl,--stack_size=2048
+            -L${CG_TOOL_ROOT}/lib
+            -llibc.a
+        "
+        sysConfigBuildOptions="
+            --output .
+            --product ${COM_TI_MSPM0_SDK_INSTALL_DIR}/.metadata/product.json
+            --compiler ticlang
+        "
+        sourceLookupPath="${COM_TI_MSPM0_SDK_INSTALL_DIR}/source/ti/driverlib"
+        description="2026 NUEDC H 循迹芯片（MSPM0G3507）：灰度循迹 + TB6612 + 编码器 + 串口调试">
+        <property name="buildProfile" value="release"/>
+        <property name="isHybrid" value="true"/>
+
+        <!-- 应用与分层源码（与 makefile SOURCES 一致） -->
+        <file path="main.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="startup_mspm0g350x_ticlang.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="app/line_task.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="bsp/board.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="bsp/hal_system_mspm0.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="bsp/uart_debug.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="control/line_controller.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="control/line_estimator.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="drivers/motor_tb6612.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="drivers/encoder_speed.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="drivers/line_sensor_mux_adc.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="services/line_processing.c" openOnCreation="false" excludeFromBuild="false"/>
+
+        <!-- SysConfig 配置 -->
+        <file path="line_follow_mspm0g3507.syscfg" openOnCreation="true" excludeFromBuild="false"/>
+
+        <!-- PC 仿真代码依赖宿主机环境，排除出固件构建 -->
+        <file path="sim/sim_main.c" openOnCreation="false" excludeFromBuild="true"/>
+        <file path="sim/sim_platform.c" openOnCreation="false" excludeFromBuild="true"/>
+        <file path="sim/sim_track.c" openOnCreation="false" excludeFromBuild="true"/>
+    </project>
+</projectSpec>
