@@ -218,12 +218,18 @@ int16_t motor_right_output(void) { return s_motor_out_r; }
  * 旧的统一 white=3400 / black=500 / noise=15 让灰度"又亮又干净"，
  * 把实车最关键的低电平通道问题（ch3/ch6 未标定时余量仅 400）
  * 完全掩盖了 —— 这也是仿真看不出直线抖动的原因之一。 */
+/* 2026-11-07 实车 cal apply 实测（黑/白电平，逐通道）：
+ * 注意 ch4 黑电平 1265，是其他通道（234~423）的 5 倍 —— 探头异常
+ * （脏污/高度/漏光）或标定时线未盖准，导致其阈值被抬到 2211。 */
 static const double s_white_lv[TEMPLATE_SENSOR_CHANNELS] = {
-    3300.0, 3250.0, 2730.0, 2440.0, 3315.0, 2810.0, 2540.0, 3070.0
+    3173.0, 3102.0, 2893.0, 2624.0, 3157.0, 3007.0, 2749.0, 3059.0
 };
-#define SIM_GRAY_BLACK  480.0
+static const double s_black_lv[TEMPLATE_SENSOR_CHANNELS] = {
+    423.0, 281.0, 234.0, 247.0, 1265.0, 252.0, 256.0, 269.0
+};
 
 const double *sim_gray_white_levels(void) { return s_white_lv; }
+const double *sim_gray_black_levels(void) { return s_black_lv; }
 
 static void sensor_generate(void)
 {
@@ -254,7 +260,7 @@ static void sensor_generate(void)
         } else {
             t = (a - g_sim.line_half_mm) / 3.0; /* 3mm 过渡带 */
         }
-        v = SIM_GRAY_BLACK + t * (s_white_lv[ch] - SIM_GRAY_BLACK)
+        v = s_black_lv[ch] + t * (s_white_lv[ch] - s_black_lv[ch])
             + sim_noise();
         if (v < 0.0) v = 0.0;
         if (v > 4095.0) v = 4095.0;

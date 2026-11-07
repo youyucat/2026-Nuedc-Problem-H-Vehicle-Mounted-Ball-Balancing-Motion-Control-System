@@ -100,9 +100,15 @@ static void run_scene(const scene_t *sc, int16_t kp, int16_t kd,
         uint8_t i;
         /* 用实车实测的每通道电平（等价于跑过 cal white/black/apply）。
          * 实际行驶总是标定后状态，未标定的阈值不在仿真覆盖范围。 */
-        for (i = 0; i < TEMPLATE_SENSOR_CHANNELS; ++i) {
-            black[i] = 480U;
-            white[i] = (uint16_t)sim_gray_white_levels()[i];
+        {
+            /* 实车 cal apply 实测值。SIM_CH4_FIX=1 时把 ch4 黑电平从
+             * 异常的 1265 改成正常量级（250），用于对照量化该通道的影响。 */
+            int ch4_fix = (getenv("SIM_CH4_FIX") != NULL);
+            for (i = 0; i < TEMPLATE_SENSOR_CHANNELS; ++i) {
+                black[i] = (uint16_t)sim_gray_black_levels()[i];
+                white[i] = (uint16_t)sim_gray_white_levels()[i];
+            }
+            if (ch4_fix) black[4] = 250U;
         }
         (void)line_processing_apply_points(black, white);
     }
