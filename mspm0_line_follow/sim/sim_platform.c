@@ -38,6 +38,9 @@ sim_params_t g_sim = {
     800.0,    /* v_max_mm_s */
     100.0,    /* motor_tau_ms */
     15.0,     /* noise */
+    1.0,      /* gain_left：实车可扫 0.95~1.05 */
+    1.0,      /* gain_right */
+    0.88,     /* turn_eff：差速只有 88% 变成真实转角（侧滑/间隙） */
     42U
 };
 
@@ -45,6 +48,7 @@ sim_car_t g_car;
 
 static uint32_t s_now_ms;
 static int32_t  s_enc_delta_l, s_enc_delta_r;
+static double   s_enc_frac_l, s_enc_frac_r;   /* 计数小数余量 */
 static int32_t  s_enc_total_l,  s_enc_total_r;
 static bool     s_motor_enabled;
 static int16_t  s_pwm_l, s_pwm_r;
@@ -68,6 +72,7 @@ void sim_reset(double x, double y, double th)
     s_now_ms = 0U;
     s_enc_delta_l = s_enc_delta_r = 0;
     s_enc_total_l = s_enc_total_r = 0;
+    s_enc_frac_l = s_enc_frac_r = 0.0;
     s_motor_enabled = false;
     s_pwm_l = s_pwm_r = 0;
     s_motor_out_l = s_motor_out_r = 0;
@@ -95,8 +100,8 @@ void sim_physics_step(void)
 
     if (alpha > 1.0) alpha = 1.0;
     if (s_motor_enabled) {
-        g_car.target_left  = pwm_to_speed(s_pwm_l);
-        g_car.target_right = pwm_to_speed(s_pwm_r);
+        g_car.target_left  = pwm_to_speed(s_pwm_l)  * g_sim.gain_left;
+        g_car.target_right = pwm_to_speed(s_pwm_r) * g_sim.gain_right;
     } else {
         g_car.target_left = g_car.target_right = 0.0;
     }
@@ -104,7 +109,10 @@ void sim_physics_step(void)
     g_car.v_right += (g_car.target_right - g_car.v_right) * alpha;
 
     v = (g_car.v_left + g_car.v_right) / 2.0;
-    omega = (g_car.v_right - g_car.v_left) / g_sim.wheel_base_mm;
+    /* 差速 -> 转角打折：实车轮胎侧滑、减速箱间隙让实际转向小于
+     * 纯运动学预测（1.0 = 理想刚体） */
+    omega = (g_car.v_right - g_car.v_left) / g_sim.wheel_base_mm *
+            g_sim.turn_eff;
 
     travel_l = g_car.v_left  * dt;
     travel_r = g_car.v_right * dt;
@@ -112,12 +120,23 @@ void sim_physics_step(void)
     /* 编码器计数：1489 counts/rev，150.8mm/rev（config 实测值）
      * counts = travel_mm * 1489 / 150.8 ≈ travel_mm * 9.874 */
     {
-        double cl = travel_l * 1489.0 / 150.8;
-        double cr = travel_r * 1489.0 / 150.8;
-        s_enc_delta_l += (int32_t)cl;
-        s_enc_delta_r += (int32_t)cr;
-        s_enc_total_l += (int32_t)cl;
-        s_enc_total_r += (int32_t)cr;
+        /* 小数余量必须保留：旧版每 1ms 独立截断，260mm/s 时每步丢
+         * 0.57 个计数（≈22% 系统误差），且低速时直接不计数 ——
+         * 仿真把编码器做得比实车精细，掩盖了速度环/阻尼对量化噪声
+         * 的敏感性（2026-11-07 实车翻车的仿真根源之一）。
+         * 保留余量后，10ms 采样窗口内 delta 是整数计数，速度分辨率
+         * 自然变成 150.8/1489/0.01 ≈ 10.1 mm/s，与实车一致。 */
+        double cl = travel_l * 1489.0 / 150.8 + s_enc_frac_l;
+        double cr = travel_r * 1489.0 / 150.8 + s_enc_frac_r;
+        int32_t il = (int32_t)cl;
+        int32_t ir = (int32_t)cr;
+
+        s_enc_frac_l = cl - (double)il;
+        s_enc_frac_r = cr - (double)ir;
+        s_enc_delta_l += il;
+        s_enc_delta_r += ir;
+        s_enc_total_l += il;
+        s_enc_total_r += ir;
     }
 
     g_car.th += omega * dt;

@@ -187,6 +187,18 @@ int main(int argc, char **argv)
     if (argc > 5) tau = atof(argv[5]);
     if (argc > 6) vmax = atof(argv[6]);
     if (argc > 7) g_sim.sensor_fwd_mm = atof(argv[7]);
+
+    /* 参数脆弱性扫描（环境变量，便于一次跑多组而不动命令行）：
+     *   SIM_GAIN_L / SIM_GAIN_R  左右轮增益（默认 1.0，实车 0.93~1.05）
+     *   SIM_TURN_EFF             差速转角有效系数（默认 0.88）
+     *   SIM_TAU_MS               电机一阶滞后覆盖（默认走命令行）*/
+    {
+        const char *e;
+        if ((e = getenv("SIM_GAIN_L")) != NULL) g_sim.gain_left  = atof(e);
+        if ((e = getenv("SIM_GAIN_R")) != NULL) g_sim.gain_right = atof(e);
+        if ((e = getenv("SIM_TURN_EFF")) != NULL) g_sim.turn_eff = atof(e);
+        if ((e = getenv("SIM_TAU_MS")) != NULL) tau = atof(e);
+    }
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "v") == 0) g_verbose = 1;
     }

@@ -30,6 +30,9 @@ typedef struct {
     double v_max_mm_s;        /* 满占空比轮速 */
     double motor_tau_ms;      /* 电机一阶滞后 */
     double noise;             /* 灰度读数噪声（ADC 量化近似） */
+    double gain_left;         /* 左轮增益（1.0 = 标称；实车左右电机/减速箱不等） */
+    double gain_right;        /* 右轮增益 */
+    double turn_eff;          /* 差速转角的有效系数（轮胎侧滑/死区，1.0=理想） */
     unsigned seed;
 } sim_params_t;
 
