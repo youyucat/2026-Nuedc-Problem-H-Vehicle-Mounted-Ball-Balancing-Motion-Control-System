@@ -107,7 +107,18 @@
 #define TEMPLATE_SPEED_PI_MIN_OUTPUT     225
 /* 软起步：目标速度每 5 ms 拍最多增加这么多 mm/s（停车是立即的）。
  * 1 => 到 260 mm/s 约 1.3 s，另一颗芯片上的小球不会被甩出去。 */
-#define TEMPLATE_LINE_RAMP_STEP_MM_S_PER_TICK   3
+/* 速度目标限幅（每 5ms 控制拍，1 mm/s/拍 = 200 mm/s²）
+ *
+ * 2026-11-07：小球在管道里，车体纵向加速度突变会把球甩离中心点。
+ * 原实现用单一斜坡同时作用在左右轮上，导致「起步要慢」与「入弯要快」
+ * 互相打架（斜坡过大入弯有力但起步甩球，斜坡过小起步平顺但入弯无力）。
+ * 现改为共模/差模分离：
+ *   - 共模（车速）慢：出发/停车平滑，球不被前后甩
+ *   - 差模（转向）快：入弯差速及时建立，出弯迅速回正
+ * 数值换算：1 mm/s/拍 = 200 mm/s² */
+#define TEMPLATE_LINE_ACCEL_STEP_MM_S_PER_TICK   1   /* 200 mm/s² 起步加速 */
+#define TEMPLATE_LINE_DECEL_STEP_MM_S_PER_TICK   2   /* 400 mm/s² 停车/减速 */
+#define TEMPLATE_LINE_TURN_STEP_MM_S_PER_TICK    4   /* 800 mm/s² 转向差速 */
 /* 转弯自适应减速：每 1 mm/s 打角量降低基础速度百分之几（0 = 关闭）。 */
 #define TEMPLATE_LINE_TURN_DECEL_FRACTION       10
 #define TEMPLATE_LINE_TURN_MIN_RUN_MM_S         80

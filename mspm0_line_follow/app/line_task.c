@@ -43,8 +43,8 @@ static int16_t s_line_error_filtered;
 static bool s_line_error_init;
 static int16_t s_last_valid_left_target;
 static int16_t s_last_valid_right_target;
-static int16_t s_ramp_left;
-static int16_t s_ramp_right;
+static int16_t s_ramp_common;   /* 已平滑的共模速度（车速） */
+static int16_t s_ramp_diff;     /* 已平滑的差模（转向修正） */
 static int8_t s_last_turn_sign;
 static speed_pi_state_t s_left_speed_pi;
 static speed_pi_state_t s_right_speed_pi;
@@ -82,8 +82,8 @@ static void clear_motion(void)
     s_line_error_filtered = 0;
     s_last_valid_left_target = 0;
     s_last_valid_right_target = 0;
-    s_ramp_left = 0;
-    s_ramp_right = 0;
+    s_ramp_common = 0;
+    s_ramp_diff = 0;
     s_last_turn_sign = 0;
 }
 
@@ -322,21 +322,35 @@ static void running_step(uint32_t now_ms)
     } else {
         recover_lost_line(now_ms, &left_target, &right_target);
     }
-    /* 软起步：目标速度从 0 缓慢爬到目标（每 5 ms 拍 1 mm/s），停车是立即的
-     * 并复位斜坡，下次起步重新缓起 —— 另一颗芯片上的小球不挨冲击。 */
-    if ((left_target == 0) && (right_target == 0)) {
-        s_ramp_left = 0;
-        s_ramp_right = 0;
-    } else {
-        s_ramp_left = ramp_toward(
-            s_ramp_left, left_target,
-            TEMPLATE_LINE_RAMP_STEP_MM_S_PER_TICK);
-        s_ramp_right = ramp_toward(
-            s_ramp_right, right_target,
-            TEMPLATE_LINE_RAMP_STEP_MM_S_PER_TICK);
+    /* ---- 速度目标平滑：共模/差模分离 ----
+     * 小球在管道里，纵向加速度突变会把球甩离中心。所以：
+     *   共模（车速）= (L+R)/2：加速 200mm/s²、减速 400mm/s² —— 出发/停车
+     *       都平滑，球只受缓慢的前后加速度；
+     *   差模（转向）= (L-R)/2：800mm/s² —— 入弯差速及时建立，出弯迅速回正，
+     *       不再被慢斜坡拖住。
+     * 停车也走斜坡（原来目标归零就立即 brake，是速度阶跃，会前后甩球）。 */
+    {
+        bool   want_stop = (left_target == 0) && (right_target == 0);
+        int16_t tgt_common = want_stop ? 0
+            : (int16_t)(((int32_t)left_target + right_target) / 2);
+        int16_t tgt_diff = want_stop ? 0
+            : (int16_t)(((int32_t)left_target - right_target) / 2);
+        int16_t common_step = (tgt_common < s_ramp_common)
+            ? TEMPLATE_LINE_DECEL_STEP_MM_S_PER_TICK
+            : TEMPLATE_LINE_ACCEL_STEP_MM_S_PER_TICK;
+
+        s_ramp_common = ramp_toward(s_ramp_common, tgt_common, common_step);
+        s_ramp_diff = ramp_toward(s_ramp_diff, tgt_diff,
+                                  TEMPLATE_LINE_TURN_STEP_MM_S_PER_TICK);
+        left_target  = clamp_line_target(
+            (int16_t)(s_ramp_common + s_ramp_diff));
+        right_target = clamp_line_target(
+            (int16_t)(s_ramp_common - s_ramp_diff));
+        if (want_stop && (s_ramp_common == 0) && (s_ramp_diff == 0)) {
+            left_target = 0;
+            right_target = 0;
+        }
     }
-    left_target = s_ramp_left;
-    right_target = s_ramp_right;
     s_snapshot.left_target = left_target;
     s_snapshot.right_target = right_target;
     left_output = s_left_speed_output;
