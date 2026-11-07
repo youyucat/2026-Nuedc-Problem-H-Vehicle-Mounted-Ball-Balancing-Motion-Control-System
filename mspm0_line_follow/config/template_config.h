@@ -43,7 +43,7 @@
 
 /* ---------- 循迹外环（PD）默认参数 ---------- */
 /* 已验证的一组：基础速度 260、Kp 0.12、Kd 0.13（千分之一为单位）。 */
-#define TEMPLATE_DEFAULT_BASE_OUTPUT    260
+#define TEMPLATE_DEFAULT_BASE_OUTPUT    200
 #define TEMPLATE_DEFAULT_KP_MILLI       120
 #define TEMPLATE_DEFAULT_KD_MILLI       130
 /* 打角限幅：左右目标速度之差的一半，最大 120 mm/s。 */
@@ -107,7 +107,7 @@
 #define TEMPLATE_SPEED_PI_MIN_OUTPUT     225
 /* 软起步：目标速度每 5 ms 拍最多增加这么多 mm/s（停车是立即的）。
  * 1 => 到 260 mm/s 约 1.3 s，另一颗芯片上的小球不会被甩出去。 */
-#define TEMPLATE_LINE_RAMP_STEP_MM_S_PER_TICK   1
+#define TEMPLATE_LINE_RAMP_STEP_MM_S_PER_TICK   3
 /* 转弯自适应减速：每 1 mm/s 打角量降低基础速度百分之几（0 = 关闭）。 */
 #define TEMPLATE_LINE_TURN_DECEL_FRACTION       10
 #define TEMPLATE_LINE_TURN_MIN_RUN_MM_S         80
