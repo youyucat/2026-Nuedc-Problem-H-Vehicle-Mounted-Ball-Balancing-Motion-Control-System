@@ -166,7 +166,6 @@ static void print_help(void)
         "stream <ms>|off   : period stat print\r\n"
         "start | stop | reset\r\n"
         "gain [base kp kd] : query or set (IDLE only)\r\n"
-        "kdw [milli]      : wheel-diff damping, live tunable\r\n"
         "trim [l r]       : query or set (IDLE only)\r\n"
         "cal white         : sample WHITE, car on white floor\r\n"
         "cal black         : sample BLACK, car on line\r\n"
@@ -369,18 +368,6 @@ static void handle_line(char *line)
         } else {
             line_task_get_gains(&base, &kp, &kd);
             dbg_printf("base=%d kp(m)= %d kd(m)= %d\r\n", base, kp, kd);
-        }
-    } else if (strcmp(words[0], "kdw") == 0) {
-        if (n >= 2U) {
-            bool ok;
-            int v = parse_int(words[1], &ok);
-            if (ok && line_task_set_kdw((int16_t)v)) {
-                dbg_printf("kdw=%d\r\n", v);
-            } else {
-                dbg_write("kdw: rejected (0..2000)\r\n");
-            }
-        } else {
-            dbg_printf("kdw=%d\r\n", (int)line_task_get_kdw());
         }
     } else if (strcmp(words[0], "trim") == 0) {
         if (n >= 3U) {

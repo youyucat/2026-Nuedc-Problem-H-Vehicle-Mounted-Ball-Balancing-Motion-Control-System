@@ -47,7 +47,7 @@
 #define TEMPLATE_DEFAULT_KP_MILLI       120
 #define TEMPLATE_DEFAULT_KD_MILLI       130
 /* 打角限幅：左右目标速度之差的一半，最大 120 mm/s。 */
-#define TEMPLATE_LINE_MAX_CORRECTION_MM_S 300
+#define TEMPLATE_LINE_MAX_CORRECTION_MM_S 120
 
 /* ---------- 丢线恢复 ---------- */
 /* 先保持最后有效目标 HOLD_MS，然后进入左右交替摇头扫描（每 SWEEP_MS 换向，
@@ -109,7 +109,7 @@
  * 1 => 到 260 mm/s 约 1.3 s，另一颗芯片上的小球不会被甩出去。 */
 #define TEMPLATE_LINE_RAMP_STEP_MM_S_PER_TICK   1
 /* 转弯自适应减速：每 1 mm/s 打角量降低基础速度百分之几（0 = 关闭）。 */
-#define TEMPLATE_LINE_TURN_DECEL_FRACTION 10
+#define TEMPLATE_LINE_TURN_DECEL_FRACTION       10
 #define TEMPLATE_LINE_TURN_MIN_RUN_MM_S         80
 
 #endif
