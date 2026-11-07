@@ -50,6 +50,8 @@ void sim_physics_step(void);
 uint32_t sim_hal_time_millis(void);
 void     sim_hal_board_init(void);
 const int16_t *sim_hal_gray_positions(void);
+/* 每通道实测白电平（2026-11-07 实车 raw 统计），供 sim_main 模拟标定 */
+const double *sim_gray_white_levels(void);
 void     sim_motor_brake(void);
 void     sim_motor_disable(void);
 bool     sim_motor_enable(void);

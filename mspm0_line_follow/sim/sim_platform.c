@@ -43,7 +43,7 @@ sim_params_t g_sim = {
     617.0,    /* v_max_mm_s：pwm=1000 实测 617mm/s（原 800） */
     0.007,    /* dead_frac：实测死区 0.7%（原 0.15） */
     90.0,     /* motor_tau_ms：实测 63% 上升 80~95ms（原 100） */
-    15.0,     /* noise */
+    60.0,     /* noise：实车白底峰峰 100~500，取 ±60 中位 */
     1.0,      /* gain_left */
     1.011,    /* gain_right：右轮 624/617 略快 1.1% */
     0.88,     /* turn_eff */
@@ -211,13 +211,28 @@ void motor_brake(void)
 int16_t motor_left_output(void)  { return s_motor_out_l; }
 int16_t motor_right_output(void) { return s_motor_out_r; }
 
-/* ---- 灰度传感器模型 ---- */
+/* ---- 灰度传感器模型 ----
+ * 2026-11-07 实车 raw 实测标定（车静置不同横向偏移，6 帧）：
+ *   白电平各通道差极大：2441 ~ 3330（ch3 最暗、ch4 最亮），
+ *   纯黑 ~480，白底噪声 ±60~260（ch5 最大）。
+ * 旧的统一 white=3400 / black=500 / noise=15 让灰度"又亮又干净"，
+ * 把实车最关键的低电平通道问题（ch3/ch6 未标定时余量仅 400）
+ * 完全掩盖了 —— 这也是仿真看不出直线抖动的原因之一。 */
+static const double s_white_lv[TEMPLATE_SENSOR_CHANNELS] = {
+    3300.0, 3250.0, 2730.0, 2440.0, 3315.0, 2810.0, 2540.0, 3070.0
+};
+#define SIM_GRAY_BLACK  480.0
+
+const double *sim_gray_white_levels(void) { return s_white_lv; }
+
 static void sensor_generate(void)
 {
     uint8_t ch;
 
     if (!s_track_ready) {
-        for (ch = 0; ch < TEMPLATE_SENSOR_CHANNELS; ++ch) s_raw[ch] = 3400U;
+        for (ch = 0; ch < TEMPLATE_SENSOR_CHANNELS; ++ch) {
+            s_raw[ch] = (uint16_t)s_white_lv[ch];
+        }
         return;
     }
     for (ch = 0; ch < TEMPLATE_SENSOR_CHANNELS; ++ch) {
@@ -239,7 +254,8 @@ static void sensor_generate(void)
         } else {
             t = (a - g_sim.line_half_mm) / 3.0; /* 3mm 过渡带 */
         }
-        v = 500.0 + t * (3400.0 - 500.0) + sim_noise();
+        v = SIM_GRAY_BLACK + t * (s_white_lv[ch] - SIM_GRAY_BLACK)
+            + sim_noise();
         if (v < 0.0) v = 0.0;
         if (v > 4095.0) v = 4095.0;
         s_raw[ch] = (uint16_t)v;
