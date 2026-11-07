@@ -98,19 +98,11 @@ static void run_scene(const scene_t *sc, int16_t kp, int16_t kd,
         uint16_t black[TEMPLATE_SENSOR_MAX_CHANNELS];
         uint16_t white[TEMPLATE_SENSOR_MAX_CHANNELS];
         uint8_t i;
-        /* 用实车实测的每通道电平（相当于已跑过 cal white/black/apply）。
-         * 各通道阈值因此独立：ch3=(2440+480)/2=1460，与统一 2047 相差 590。
-         * SIM_NO_CAL=1 时模拟「上电未标定」：全通道阈值 2047 —— 用来
-         * 验证低电平通道（ch3/ch6 白电平仅 2440/2540）的误判风险。 */
-        int no_cal = (getenv("SIM_NO_CAL") != NULL);
+        /* 用实车实测的每通道电平（等价于跑过 cal white/black/apply）。
+         * 实际行驶总是标定后状态，未标定的阈值不在仿真覆盖范围。 */
         for (i = 0; i < TEMPLATE_SENSOR_CHANNELS; ++i) {
-            if (no_cal) {
-                black[i] = 0U;
-                white[i] = 4095U;          /* 阈值回到 2047，与实车 cal=0 一致 */
-            } else {
-                black[i] = 480U;
-                white[i] = (uint16_t)sim_gray_white_levels()[i];
-            }
+            black[i] = 480U;
+            white[i] = (uint16_t)sim_gray_white_levels()[i];
         }
         (void)line_processing_apply_points(black, white);
     }
