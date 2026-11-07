@@ -23,6 +23,7 @@
 #include "hal/hal_time.h"
 #include "hal/hal_uart.h"
 #include "drivers/uart_async.h"
+#include "drivers/motor.h"
 #include "services/line_processing.h"
 
 /* ===================== 状态 ===================== */
@@ -34,6 +35,16 @@ static uint8_t  s_rx_len;
 
 static uint32_t s_stream_period_ms;      /* 0 = 关闭周期 stat */
 static uint32_t s_stream_last_ms;
+
+/* ---- 开环阶跃测试（标定执行器模型：PWM->轮速增益/tau/死区/左右差）----
+ * 用法：车轮架空！open <pwm> <ms>  之后每 10ms 输出一行 CSV：
+ *   O,<t_ms>,<vL>,<vR>,<pwm>
+ * 用于 PC 侧 tools/fit_actuator.py 拟合一阶响应。 */
+static bool     s_open_active;
+static int16_t  s_open_pwm;
+static uint32_t s_open_start_ms;
+static uint32_t s_open_end_ms;
+static uint32_t s_open_last_ms;
 
 static uint8_t  s_cal_sample_target;     /* 采样帧数 */
 static uint8_t  s_cal_sample_count;
@@ -126,6 +137,56 @@ static const char *state_name(line_task_state_t state)
     }
 }
 
+/* ---- 开环阶跃测试 ---- */
+
+static void open_begin(int16_t pwm, uint32_t ms)
+{
+    line_task_snapshot_t snap;
+
+    line_task_get_snapshot(&snap);
+    if (snap.state == LINE_TASK_STATE_RUNNING) {
+        dbg_write("open: stop the car first (stop)\r\n");
+        return;
+    }
+    if (!motor_enable()) {
+        dbg_write("open: motor enable failed\r\n");
+        return;
+    }
+    (void)motor_set(pwm, pwm);
+    s_open_pwm       = pwm;
+    s_open_active    = true;
+    s_open_start_ms  = hal_time_millis();
+    s_open_end_ms    = s_open_start_ms + ms;
+    s_open_last_ms   = 0U;
+    dbg_printf("open pwm=%d for %u ms (CSV: O,t,vL,vR,pwm)\r\n",
+               (int)pwm, (unsigned)ms);
+}
+
+/* 每 10ms 输出一行 CSV，到点刹车。供 PC 侧拟合一阶响应。 */
+static void open_step(uint32_t now_ms)
+{
+    line_task_snapshot_t snap;
+
+    if (!s_open_active) return;
+    if ((uint32_t)(now_ms - s_open_start_ms) >= s_open_end_ms - s_open_start_ms) {
+        motor_brake();
+        motor_disable();
+        s_open_active = false;
+        dbg_printf("open done (pwm=%d)\r\n", (int)s_open_pwm);
+        return;
+    }
+    if ((s_open_last_ms != 0U) &&
+        ((uint32_t)(now_ms - s_open_last_ms) < 10U)) {
+        return;
+    }
+    s_open_last_ms = now_ms;
+    line_task_get_snapshot(&snap);
+    dbg_printf("O,%u,%d,%d,%d\r\n",
+               (unsigned)(now_ms - s_open_start_ms),
+               snap.left_speed_mm_s, snap.right_speed_mm_s,
+               (int)s_open_pwm);
+}
+
 static void print_stat(void)
 {
     line_task_snapshot_t snap;
@@ -166,6 +227,7 @@ static void print_help(void)
         "stream <ms>|off   : period stat print\r\n"
         "start | stop | reset\r\n"
         "gain [base kp kd] : query or set (IDLE only)\r\n"
+        "open <pwm> <ms>   : open-loop step test, CSV out\r\n"
         "trim [l r]       : query or set (IDLE only)\r\n"
         "cal white         : sample WHITE, car on white floor\r\n"
         "cal black         : sample BLACK, car on line\r\n"
@@ -369,6 +431,16 @@ static void handle_line(char *line)
             line_task_get_gains(&base, &kp, &kd);
             dbg_printf("base=%d kp(m)= %d kd(m)= %d\r\n", base, kp, kd);
         }
+    } else if (strcmp(words[0], "open") == 0) {
+        bool ok1, ok2;
+        int pwm = (n >= 2U) ? parse_int(words[1], &ok1) : 0;
+        int ms  = (n >= 3U) ? parse_int(words[2], &ok2) : 0;
+        if ((n >= 3U) && ok1 && ok2 && (pwm >= -1000) && (pwm <= 1000) &&
+            (ms >= 200) && (ms <= 3000)) {
+            open_begin((int16_t)pwm, (uint32_t)ms);
+        } else {
+            dbg_write("open <pwm -1000..1000> <ms 200..3000>  (WHEELS OFF GROUND!)\r\n");
+        }
     } else if (strcmp(words[0], "trim") == 0) {
         if (n >= 3U) {
             bool ok1, ok2;
@@ -435,8 +507,11 @@ void uart_debug_poll(void)
         }
     }
 
-    /* ---- 3. 周期打印 ---- */
+    /* ---- 3. 开环阶跃测试推进 ---- */
     now = hal_time_millis();
+    open_step(now);
+
+    /* ---- 4. 周期打印 ---- */
     if ((s_stream_period_ms > 0U) &&
         ((uint32_t)(now - s_stream_last_ms) >= s_stream_period_ms)) {
         s_stream_last_ms = now;
