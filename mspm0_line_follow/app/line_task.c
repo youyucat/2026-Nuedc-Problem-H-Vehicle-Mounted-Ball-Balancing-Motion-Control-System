@@ -525,3 +525,15 @@ bool line_task_set_motor_trim(uint16_t left_permille,
     s_right_motor_trim_permille = right_permille;
     return true;
 }
+
+bool line_task_set_kdw(int16_t kdw_milli)
+{
+    if ((kdw_milli < 0) || (kdw_milli > 2000)) return false;
+    s_controller.kdw_milli = kdw_milli;
+    return true;
+}
+
+int16_t line_task_get_kdw(void)
+{
+    return s_controller.kdw_milli;
+}

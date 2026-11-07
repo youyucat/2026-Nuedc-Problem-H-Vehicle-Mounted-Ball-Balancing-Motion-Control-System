@@ -45,6 +45,7 @@ void line_controller_step(line_controller_t *controller,
     int32_t correction;
     int32_t abs_error;
     int32_t gain;
+    int32_t kdw_eff;
 
     if ((controller == NULL) || (left == NULL) || (right == NULL)) return;
     if (controller->has_previous) {
@@ -61,9 +62,18 @@ void line_controller_step(line_controller_t *controller,
            ((int32_t)controller->kp_milli *
             (int32_t)controller->p_boost_permille / 1000) *
                abs_error / 1000;
+    /* 轮速差阻尼随 |e| 退让（2026-11-07 实车）：弯道稳态需要持续差速，
+     * 固定 kdw 会把转弯量当成「转角过快」持续反推 —— 实测表现为
+     * 「转弯一半角度不够脱线 / 直接冲出弯道」。所以直线（|e|≈0）保留
+     * 全阻尼压蛇形，弯道（|e| 大）阻尼线性衰减到 35%。 */
+    {
+        int32_t rolloff = (abs_error * 1000) / 600;   /* e=600(≈21mm) 时全让路 */
+        if (rolloff > 1000) rolloff = 1000;
+        kdw_eff = (int32_t)controller->kdw_milli * (1000 - rolloff) / 1000;
+    }
     correction = (gain * error +
                   (int32_t)controller->kd_milli * derivative) / 1000 +
-                 ((int32_t)controller->kdw_milli * wheel_diff_mms) / 1000 +
+                 ((kdw_eff * wheel_diff_mms) / 1000) +
                  ((int32_t)controller->ki_milli * controller->i_acc) /
                      1000000;
     *left = clamp_output((int32_t)controller->base_output + correction);

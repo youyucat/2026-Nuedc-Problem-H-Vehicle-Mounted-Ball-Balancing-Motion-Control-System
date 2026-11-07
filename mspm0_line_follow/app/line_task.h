@@ -69,6 +69,11 @@ void line_task_get_frame(line_frame_t *frame);
  * kp/kd 以千分之一为单位。越界返回 false 且不生效。 */
 bool line_task_set_gains(int16_t base_output, int16_t kp_milli,
                          int16_t kd_milli);
+
+/* 运行时设置轮速差阻尼增益（千分比）。循迹中也可调整，用于实车找
+ * 「直线不蛇形 + 弯道角度够」的平衡点（2026-11-07）。 */
+bool line_task_set_kdw(int16_t kdw_milli);
+int16_t line_task_get_kdw(void);
 void line_task_get_gains(int16_t *base_output, int16_t *kp_milli,
                          int16_t *kd_milli);
 
