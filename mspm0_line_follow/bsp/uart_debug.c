@@ -425,7 +425,7 @@ static void handle_line(char *line)
                 line_task_set_gains((int16_t)b, (int16_t)k, (int16_t)d)) {
                 dbg_write("gain set\r\n");
             } else {
-                dbg_write("gain: rejected (must be IDLE, or out of range)\r\n");
+                dbg_write("gain: rejected (out of range)\r\n");
             }
         } else {
             line_task_get_gains(&base, &kp, &kd);

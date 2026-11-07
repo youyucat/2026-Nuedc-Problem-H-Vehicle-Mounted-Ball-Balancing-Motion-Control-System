@@ -58,6 +58,103 @@ def pick_port(explicit):
     return ports[idx].device
 
 
+
+class LiveTuner:
+    """自适应 kp 调参（2026-11-07）：每 3 秒一个窗口，按窗口指标实时改 kp。
+
+    规则（保守优先）：
+      - 窗口内丢线 > 800ms  → 停车、回滚到上一个 kp，结束
+      - 弯道吃紧（mean|err|>=300）且直线未失稳 → kp +20（上限 220）
+      - 直线抖（mean|err|<150 且过零 >2.5/s）→ kp -20（下限 100）
+      - 其余保持
+    所有动作实时打印并记录时间线。
+    """
+
+    WINDOW_S   = 3.0
+    KP_MIN     = 100
+    KP_MAX     = 220
+    STEP       = 20
+
+    def __init__(self, ser, args, send):
+        self.ser = ser
+        self.send = send
+        self.base = args.base if args.base is not None else 200
+        self.kd = args.kd if args.kd is not None else 130
+        self.kp = args.kp if args.kp is not None else 120
+        self.kp0 = self.kp
+        self.win_start = time.time()
+        self.win_rows = []
+        self.timeline = []
+        self.last_raise = False
+        self.stopped = False
+        self.zc = 0.0
+        self.rms = 0.0
+        print("[tune] 初始 kp=%d（范围 %d..%d，步进 %d）"
+              % (self.kp, self.KP_MIN, self.KP_MAX, self.STEP))
+
+    def feed(self, rows):
+        if self.stopped:
+            return
+        self.win_rows.extend(rows)
+        now = time.time()
+        if now - self.win_start < self.WINDOW_S:
+            return
+        win = self.win_rows[-int((now - self.win_start) / 0.1):]
+        self.win_rows = []
+        self.win_start = now
+        if len(win) < 5:
+            return
+
+        valid = [r for r in win if r.get("valid") == 1 and "err" in r]
+        lost_ms = int((len(win) - len(valid)) * 100)      # stream≈100ms/帧
+        if lost_ms == 0 and len(win) > len(valid):
+            lost_ms = (len(win) - len(valid)) * 100
+
+        mean_ae = rms = 0.0
+        zc = 0
+        if valid:
+            errs = [abs(r["err"]) for r in valid]
+            mean_ae = sum(errs) / len(errs)
+            rms = (sum(e * e for e in errs) / len(errs)) ** 0.5
+            signs = [1 if r["err"] >= 0 else -1 for r in valid]
+            zc = sum(1 for k in range(1, len(signs))
+                     if signs[k] != signs[k - 1]) / self.WINDOW_S
+        self.zc, self.rms = zc, rms
+
+        action = ""
+        if lost_ms > 800:
+            self.kp = self.kp0
+            self.send("gain %d %d %d" % (self.base, self.kp, self.kd))
+            action = "!! 丢线 %dms → 停车回滚 kp=%d" % (lost_ms, self.kp)
+            self.send("stop")
+            self.stopped = True
+        elif mean_ae >= 300 and self.kp < self.KP_MAX:
+            self.kp = min(self.kp + self.STEP, self.KP_MAX)
+            self.send("gain %d %d %d" % (self.base, self.kp, self.kd))
+            action = "弯道吃紧(mean|e|=%.0f) → kp=%d" % (mean_ae, self.kp)
+            self.last_raise = True
+        elif mean_ae < 150 and zc > 2.5 and self.kp > self.KP_MIN:
+            self.kp = max(self.kp - self.STEP, self.KP_MIN)
+            self.send("gain %d %d %d" % (self.base, self.kp, self.kd))
+            action = "直线抖(zc=%.1f/s) → kp=%d" % (zc, self.kp)
+            self.last_raise = False
+        else:
+            action = "保持 kp=%d" % self.kp
+
+        print("[tune %4.1fs] 帧%d 有效%d mean|e|=%3.0f rms=%3.0f zc=%.1f 丢%4dms | %s"
+              % (now - self.t0, len(win), len(valid), mean_ae, rms, zc,
+                 lost_ms, action))
+        self.timeline.append((now - self.t0, self.kp, action))
+
+    def start(self):
+        self.t0 = time.time()
+        self.win_start = self.t0
+
+    def summary(self):
+        print("\n[tune] kp 轨迹: %s" %
+              " → ".join("%d@%.0fs" % (kp, t) for t, kp, _ in self.timeline[-12:]))
+        print("[tune] 最终 kp=%d（初始 %d）" % (self.kp, self.kp0))
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", help="COM7 / /dev/ttyUSB0")
@@ -69,6 +166,8 @@ def main():
     ap.add_argument("--kp", type=int, help="下发 kp(千分)")
     ap.add_argument("--kd", type=int, help="下发 kd(千分)")
     ap.add_argument("--outdir", default="tools/runs")
+    ap.add_argument("--tune", action="store_true",
+                    help="自适应调参：运行中按窗口指标实时改 kp（需固件支持运行中 gain）")
     args = ap.parse_args()
 
     port = pick_port(args.port)
@@ -105,7 +204,13 @@ def main():
     send("stream %d" % args.stream)
     send("start")
     ser.reset_input_buffer()
+    if tuner is not None:
+        tuner.start()
     print("发车！采集 %.0f 秒（Ctrl-C 提前结束）" % args.duration)
+
+    tuner = None
+    if args.tune:
+        tuner = LiveTuner(ser, args, send)
 
     rows = []
     cur = None
@@ -140,12 +245,16 @@ def main():
                     })
                     rows.append(cur)
                     cur = None
+            if tuner is not None:
+                tuner.feed(rows)
     except KeyboardInterrupt:
         print("\n提前结束")
         if cur:
             rows.append(cur)
 
     send("stop")
+    if tuner is not None:
+        tuner.summary()
     ser.close()
 
     # 补齐缺字段（只收到头的帧）

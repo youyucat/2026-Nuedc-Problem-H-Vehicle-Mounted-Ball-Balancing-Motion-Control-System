@@ -505,8 +505,11 @@ void line_task_reset_fault(void)
 bool line_task_set_gains(int16_t base_output, int16_t kp_milli,
                          int16_t kd_milli)
 {
-    if ((s_snapshot.state != LINE_TASK_STATE_IDLE) ||
-        (base_output < 0) ||
+    /* 允许运行中调参（2026-11-07）：串口侧实时找 kp 甜点。
+     * base 变化经共模斜坡限幅（200/400mm/s²），不会冲击小球；
+     * line_controller_init 只复位误差历史（D 项本就近乎无效），
+     * 对闭环无冲击。范围钳制保留。 */
+    if ((base_output < 0) ||
         (base_output > TEMPLATE_CONTROLLER_BASE_MAX) ||
         (kp_milli < 0) || (kp_milli > TEMPLATE_CONTROLLER_KP_MAX) ||
         (kd_milli < 0) || (kd_milli > TEMPLATE_CONTROLLER_KD_MAX)) {
