@@ -23,17 +23,17 @@
 #include "hal/hal_time.h"
 #include "services/line_processing.h"
 
-/* ===================== 波特率分频（UART0 BUSCLK = 80 MHz） ===================== */
-/* UART0 挂 PD0（MCLK 域），BUSCLK = MCLK = 80 MHz，不是 ULPCLK 的 40 MHz！
- * 之前按 40M 算分频 → 实际波特率 230.4k，115200 终端收到全乱码
- * （2026-11-07 实测"串口只有空白"的第二个根因）。
- * SDK 佐证：例程分频宏的命名都标注所在域实际频率
- * （如 UART_0_IBRD_32_MHZ_115200_BAUD = 17，SYSOSC 32M 域）。 */
+/* ===================== 波特率分频（UART 功能时钟 = MFPCLK 32 MHz） ===================== */
+/* MSPM0 的 UART 功能时钟走 PD1 BUSCLK，而 syscfg 已开启 MFPCLK
+ * （SYSOSC 32MHz 直通，见 .syscfg 的 MFPCLKGATE/MFCLKGATE）——所以
+ * 分频基数是 32MHz，不是 ULPCLK 40MHz 也不是 MCLK 80MHz！
+ * 两次实测踩坑记录：40M 假设 → 实际 92.2k；80M 假设 → 实际 46.1k，
+ * 115200 终端都是乱码。现按原版 empty 工程验证值 IBRD=17/FBRD=23
+ * （实际 115211.52，误差 0.01%）。 */
 
-#define DBG_CLK_HZ     80000000UL   /* UART0 在 PD0/MCLK 域，SYSPLL 80MHz */
+#define DBG_CLK_HZ     32000000UL   /* MFPCLK = SYSOSC 32MHz */
 #define DBG_BAUD       115200UL
-/* divisor = clk/(16*baud) = 43.403 -> IBRD=43, FBRD=26，
- * 实际波特率 115106，误差 0.08%。 */
+/* divisor = clk/(16*baud) = 17.3611 -> IBRD=17, FBRD=23 */
 #define DBG_IBRD       (DBG_CLK_HZ / (16UL * DBG_BAUD))
 #define DBG_FBRD       ((uint32_t)((((DBG_CLK_HZ % (16UL * DBG_BAUD)) * 64UL) \
                         + (8UL * DBG_BAUD)) / (16UL * DBG_BAUD)))
